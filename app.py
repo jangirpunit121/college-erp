@@ -227,6 +227,58 @@ hr { border: none; border-top: 1px solid #dbe3ef; margin: 1.4rem 0; }
 [data-testid="stMetric"] { background: #ffffff; padding: 14px; border: 1px solid #dbe3ef; border-radius: 12px; }
 .stMarkdown a { color: #4338ca !important; text-decoration: underline; }
 @media (max-width: 768px) { .block-container { padding: 1rem .8rem 2rem !important; } .metric-card { padding: 18px 12px; } .fee-card { padding: 18px; } }
+
+/* FIX: remove unwanted black backgrounds from headings and option boxes */
+.stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5, .stApp h6,
+[data-testid="stHeading"], [data-testid="stHeading"] *,
+[data-testid="stMarkdownContainer"] h1, [data-testid="stMarkdownContainer"] h2,
+[data-testid="stMarkdownContainer"] h3, [data-testid="stMarkdownContainer"] h4,
+[data-testid="stMarkdownContainer"] h5, [data-testid="stMarkdownContainer"] h6 {
+  background: transparent !important;
+  background-color: transparent !important;
+  color: #111827 !important;
+  -webkit-text-fill-color: #111827 !important;
+}
+/* Select/dropdown closed boxes */
+[data-testid="stSelectbox"] [data-baseweb="select"] > div,
+[data-testid="stMultiSelect"] [data-baseweb="select"] > div,
+[data-testid="stRadio"] [role="radiogroup"],
+[data-testid="stCheckbox"] label,
+[data-testid="stTextInput"] input,
+[data-testid="stNumberInput"] input,
+[data-testid="stTextArea"] textarea,
+[data-testid="stDateInput"] input,
+[data-testid="stTimeInput"] input {
+  background-color: #ffffff !important;
+  color: #172033 !important;
+  -webkit-text-fill-color: #172033 !important;
+}
+/* Dropdown menu and each option */
+[data-baseweb="popover"], [data-baseweb="popover"] > div,
+[data-baseweb="menu"], [data-baseweb="listbox"],
+[role="listbox"], [role="option"],
+[data-baseweb="menu"] li, [data-baseweb="listbox"] li {
+  background-color: #ffffff !important;
+  color: #172033 !important;
+  -webkit-text-fill-color: #172033 !important;
+}
+[role="option"]:hover, [role="option"][aria-selected="true"],
+[data-baseweb="menu"] li:hover, [data-baseweb="listbox"] li:hover {
+  background-color: #eef2ff !important;
+  color: #312e81 !important;
+  -webkit-text-fill-color: #312e81 !important;
+}
+/* Avoid dark heading/label surfaces inside forms, tabs, and expanders */
+[data-testid="stForm"], [data-testid="stExpander"],
+[data-testid="stExpander"] summary, .stTabs [data-baseweb="tab-list"],
+.stTabs [data-baseweb="tab"] {
+  color: #172033 !important;
+}
+[data-testid="stExpander"] summary,
+[data-testid="stExpander"] [data-testid="stExpanderDetails"] {
+  background-color: #ffffff !important;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
