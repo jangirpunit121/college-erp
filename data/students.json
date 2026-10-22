@@ -1,0 +1,460 @@
+[
+  {
+    "id": "STU0001",
+    "name": "akshay",
+    "email": "akshay@gmail.com",
+    "phone": "07678500304",
+    "alt_phone": "",
+    "dob": "2005-01-01",
+    "gender": "Male",
+    "marital": "Single",
+    "caste": "OBC",
+    "subcaste": "",
+    "religion": "Hindu",
+    "nationality": "Indian",
+    "blood": "O-",
+    "aadhaar_no": "3444545464454",
+    "category_cert": "",
+    "disability": "No",
+    "address": {
+      "permanent": {
+        "street": "",
+        "city": "",
+        "district": "",
+        "state": "",
+        "pin": "",
+        "country": "India"
+      },
+      "current": {
+        "street": "",
+        "city": "",
+        "district": "",
+        "state": "",
+        "pin": "",
+        "country": "India"
+      }
+    },
+    "family": {
+      "father": "",
+      "father_occupation": "",
+      "father_phone": "",
+      "mother": "",
+      "mother_occupation": "",
+      "mother_phone": "",
+      "guardian": "",
+      "guardian_relation": "",
+      "guardian_phone": "",
+      "income": "",
+      "siblings": 0,
+      "first_gen": "No"
+    },
+    "course": "BSC",
+    "course_level": "UG",
+    "semester": 1,
+    "batch": "2025-2027",
+    "subjects": [],
+    "fee": {
+      "total": 50000,
+      "discount": 0,
+      "payable": 50000,
+      "remark": "",
+      "applied_by": "",
+      "plan": "Full Payment"
+    },
+    "tenth": {
+      "board": "RBSE",
+      "year": "2023",
+      "school": "fggdfg",
+      "obtained": 454,
+      "total": 500,
+      "pct": 90.8,
+      "doc": "data\\uploads\\docs\\51e30483_bio.jpeg"
+    },
+    "twelfth": {
+      "board": "RBSE",
+      "year": "2026",
+      "school": "sdfd",
+      "stream": "Science",
+      "obtained": 234,
+      "total": 500,
+      "pct": 46.8,
+      "doc": "data\\uploads\\docs\\4c1dab85_bio.jpeg"
+    },
+    "graduation": {
+      "degree": "",
+      "univ": "",
+      "year": "",
+      "obtained": 0,
+      "total": 500,
+      "pct": 0.0,
+      "doc": null
+    },
+    "pg": {
+      "degree": "",
+      "univ": "",
+      "year": "",
+      "obtained": 0,
+      "total": 500,
+      "pct": 0.0,
+      "doc": null
+    },
+    "docs": {
+      "photo": "data\\uploads\\docs\\a998dc8d_bio.jpeg",
+      "signature": "data\\uploads\\docs\\f1cac77b_bio.jpeg",
+      "aadhar": "data\\uploads\\docs\\515aefd1_bio.jpeg",
+      "domicile": "data\\uploads\\docs\\a4b112a8_bio.jpeg",
+      "caste": null,
+      "income": null,
+      "tc": null,
+      "migration": null,
+      "medical": null,
+      "sports": null,
+      "gap": null,
+      "other": null
+    },
+    "medical": {
+      "allergies": "",
+      "chronic": "",
+      "medications": "",
+      "emergency_name": "",
+      "emergency_relation": "",
+      "emergency_phone": ""
+    },
+    "previous": {
+      "school": "",
+      "board": "",
+      "year": "",
+      "reason": ""
+    },
+    "achievements": "",
+    "hobbies": "",
+    "ncc": "No",
+    "scouts": "No",
+    "sports_level": "None",
+    "hostel": {
+      "required": "No",
+      "type": "N/A",
+      "mess": "N/A"
+    },
+    "transport": {
+      "required": "No",
+      "route": "",
+      "pickup": ""
+    },
+    "bank": {
+      "name": "",
+      "account_no": "",
+      "ifsc": "",
+      "holder": "",
+      "branch": "",
+      "upi": ""
+    },
+    "admitted": "2026-10-22 23:02:02"
+  },
+  {
+    "id": "STU0002",
+    "name": "akshay",
+    "email": "akshay@gmail.com",
+    "phone": "07678500304",
+    "alt_phone": "",
+    "dob": "2005-01-01",
+    "gender": "Male",
+    "marital": "Single",
+    "caste": "OBC",
+    "subcaste": "",
+    "religion": "Hindu",
+    "nationality": "Indian",
+    "blood": "O-",
+    "aadhaar_no": "3444545464454",
+    "category_cert": "",
+    "disability": "No",
+    "address": {
+      "permanent": {
+        "street": "",
+        "city": "",
+        "district": "",
+        "state": "",
+        "pin": "",
+        "country": "India"
+      },
+      "current": {
+        "street": "",
+        "city": "",
+        "district": "",
+        "state": "",
+        "pin": "",
+        "country": "India"
+      }
+    },
+    "family": {
+      "father": "",
+      "father_occupation": "",
+      "father_phone": "",
+      "mother": "",
+      "mother_occupation": "",
+      "mother_phone": "",
+      "guardian": "",
+      "guardian_relation": "",
+      "guardian_phone": "",
+      "income": "",
+      "siblings": 0,
+      "first_gen": "No"
+    },
+    "course": "BSC",
+    "course_level": "UG",
+    "semester": 1,
+    "batch": "2025-2027",
+    "subjects": [],
+    "fee": {
+      "total": 50000,
+      "discount": 0,
+      "payable": 50000,
+      "remark": "",
+      "applied_by": "",
+      "plan": "Full Payment"
+    },
+    "tenth": {
+      "board": "RBSE",
+      "year": "2023",
+      "school": "fggdfg",
+      "obtained": 454,
+      "total": 500,
+      "pct": 90.8,
+      "doc": "data\\uploads\\docs\\5f35020c_bio.jpeg"
+    },
+    "twelfth": {
+      "board": "RBSE",
+      "year": "2026",
+      "school": "sdfd",
+      "stream": "Science",
+      "obtained": 234,
+      "total": 500,
+      "pct": 46.8,
+      "doc": "data\\uploads\\docs\\36035117_bio.jpeg"
+    },
+    "graduation": {
+      "degree": "",
+      "univ": "",
+      "year": "",
+      "obtained": 0,
+      "total": 500,
+      "pct": 0.0,
+      "doc": null
+    },
+    "pg": {
+      "degree": "",
+      "univ": "",
+      "year": "",
+      "obtained": 0,
+      "total": 500,
+      "pct": 0.0,
+      "doc": null
+    },
+    "docs": {
+      "photo": "data\\uploads\\docs\\d8ef2b7f_bio.jpeg",
+      "signature": "data\\uploads\\docs\\99bfe655_bio.jpeg",
+      "aadhar": "data\\uploads\\docs\\1b841b5b_bio.jpeg",
+      "domicile": "data\\uploads\\docs\\0166c98d_bio.jpeg",
+      "caste": null,
+      "income": null,
+      "tc": null,
+      "migration": null,
+      "medical": null,
+      "sports": null,
+      "gap": null,
+      "other": null
+    },
+    "medical": {
+      "allergies": "",
+      "chronic": "",
+      "medications": "",
+      "emergency_name": "",
+      "emergency_relation": "",
+      "emergency_phone": ""
+    },
+    "previous": {
+      "school": "",
+      "board": "",
+      "year": "",
+      "reason": ""
+    },
+    "achievements": "",
+    "hobbies": "",
+    "ncc": "No",
+    "scouts": "No",
+    "sports_level": "None",
+    "hostel": {
+      "required": "No",
+      "type": "N/A",
+      "mess": "N/A"
+    },
+    "transport": {
+      "required": "No",
+      "route": "",
+      "pickup": ""
+    },
+    "bank": {
+      "name": "",
+      "account_no": "",
+      "ifsc": "",
+      "holder": "",
+      "branch": "",
+      "upi": ""
+    },
+    "admitted": "2026-10-22 23:02:15"
+  },
+  {
+    "id": "STU0003",
+    "name": "aman",
+    "email": "aman@gmail.com",
+    "phone": "07678500304",
+    "alt_phone": "",
+    "dob": "2005-01-01",
+    "gender": "Male",
+    "marital": "Single",
+    "caste": "General",
+    "subcaste": "",
+    "religion": "",
+    "nationality": "Indian",
+    "blood": "A+",
+    "aadhaar_no": "",
+    "category_cert": "",
+    "disability": "No",
+    "address": {
+      "permanent": {
+        "street": "",
+        "city": "",
+        "district": "",
+        "state": "",
+        "pin": "",
+        "country": "India"
+      },
+      "current": {
+        "street": "",
+        "city": "",
+        "district": "",
+        "state": "",
+        "pin": "",
+        "country": "India"
+      }
+    },
+    "family": {
+      "father": "",
+      "father_occupation": "",
+      "father_phone": "",
+      "mother": "",
+      "mother_occupation": "",
+      "mother_phone": "",
+      "guardian": "",
+      "guardian_relation": "",
+      "guardian_phone": "",
+      "income": "",
+      "siblings": 0,
+      "first_gen": "No"
+    },
+    "course": "BSC",
+    "course_level": "UG",
+    "semester": 1,
+    "batch": "2025-2027",
+    "subjects": [
+      "BSC101"
+    ],
+    "fee": {
+      "total": 50000,
+      "discount": 0,
+      "payable": 50000,
+      "remark": "",
+      "applied_by": "Super Admin",
+      "plan": "Full Payment"
+    },
+    "tenth": {
+      "board": "RBSE",
+      "year": "2023",
+      "school": "",
+      "obtained": 233,
+      "total": 500,
+      "pct": 46.6,
+      "doc": "data\\uploads\\docs\\65faf98a_bio.jpeg"
+    },
+    "twelfth": {
+      "board": "RBSE",
+      "year": "2025",
+      "school": "",
+      "stream": "Science",
+      "obtained": 444,
+      "total": 500,
+      "pct": 88.8,
+      "doc": "data\\uploads\\docs\\aead833c_bio.jpeg"
+    },
+    "graduation": {
+      "degree": "",
+      "univ": "",
+      "year": "",
+      "obtained": 0,
+      "total": 500,
+      "pct": 0.0,
+      "doc": null
+    },
+    "pg": {
+      "degree": "",
+      "univ": "",
+      "year": "",
+      "obtained": 0,
+      "total": 500,
+      "pct": 0.0,
+      "doc": null
+    },
+    "docs": {
+      "photo": "data\\uploads\\docs\\03931879_bio.jpeg",
+      "signature": "data\\uploads\\docs\\c82f664c_bio.jpeg",
+      "aadhar": "data\\uploads\\docs\\821fc3a7_bio.jpeg",
+      "domicile": null,
+      "caste": null,
+      "income": null,
+      "tc": null,
+      "migration": null,
+      "medical": null,
+      "sports": null,
+      "gap": null,
+      "other": null
+    },
+    "medical": {
+      "allergies": "",
+      "chronic": "",
+      "medications": "",
+      "emergency_name": "",
+      "emergency_relation": "",
+      "emergency_phone": ""
+    },
+    "previous": {
+      "school": "",
+      "board": "",
+      "year": "",
+      "reason": ""
+    },
+    "achievements": "",
+    "hobbies": "",
+    "ncc": "No",
+    "scouts": "No",
+    "sports_level": "None",
+    "hostel": {
+      "required": "No",
+      "type": "N/A",
+      "mess": "N/A"
+    },
+    "transport": {
+      "required": "No",
+      "route": "",
+      "pickup": ""
+    },
+    "bank": {
+      "name": "",
+      "account_no": "",
+      "ifsc": "",
+      "holder": "",
+      "branch": "",
+      "upi": ""
+    },
+    "admitted": "2026-10-22 23:13:22"
+  }
+]

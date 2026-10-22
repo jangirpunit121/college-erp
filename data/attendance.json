@@ -1,0 +1,14 @@
+[
+  {
+    "subject": "BSC101",
+    "course": "BSC",
+    "semester": 1,
+    "date": "2026-10-22",
+    "student_id": "STU0003",
+    "name": "aman",
+    "status": "Absent",
+    "remark": "",
+    "by": "Rahul",
+    "time": "2026-10-22 23:26:05"
+  }
+]

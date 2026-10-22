@@ -1,0 +1,42 @@
+[
+  {
+    "code": "BSC",
+    "name": "B.Sc",
+    "level": "Graduation"
+  },
+  {
+    "code": "BCOM",
+    "name": "B.Com",
+    "level": "Graduation"
+  },
+  {
+    "code": "BA",
+    "name": "B.A",
+    "level": "Graduation"
+  },
+  {
+    "code": "BTECH",
+    "name": "B.Tech",
+    "level": "Graduation"
+  },
+  {
+    "code": "MSC",
+    "name": "M.Sc",
+    "level": "Post Graduation"
+  },
+  {
+    "code": "MCOM",
+    "name": "M.Com",
+    "level": "Post Graduation"
+  },
+  {
+    "code": "MA",
+    "name": "M.A",
+    "level": "Post Graduation"
+  },
+  {
+    "code": "MTECH",
+    "name": "M.Tech",
+    "level": "Post Graduation"
+  }
+]

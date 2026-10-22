@@ -1,0 +1,46 @@
+[
+  {
+    "id": "admin_1",
+    "username": "admin",
+    "password": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+    "role": "admin",
+    "name": "Super Admin",
+    "email": "admin@college.edu"
+  },
+  {
+    "id": "u_TEA0001",
+    "username": "EMP101",
+    "password": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+    "role": "teacher",
+    "name": "Rahul",
+    "email": "rahul12@gmail.com",
+    "ref": "TEA0001"
+  },
+  {
+    "id": "u_STU0001",
+    "username": "akshay@gmail.com",
+    "password": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+    "role": "student",
+    "name": "akshay",
+    "email": "akshay@gmail.com",
+    "ref": "STU0001"
+  },
+  {
+    "id": "u_STU0002",
+    "username": "akshay1@gmail.com",
+    "password": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+    "role": "student",
+    "name": "akshay",
+    "email": "akshay@gmail.com",
+    "ref": "STU0002"
+  },
+  {
+    "id": "u_STU0003",
+    "username": "aman@gmail.com",
+    "password": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+    "role": "student",
+    "name": "aman",
+    "email": "aman@gmail.com",
+    "ref": "STU0003"
+  }
+]

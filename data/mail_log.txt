@@ -1,0 +1,5 @@
+[2026-10-22 23:02:02] TO:akshay@gmail.com | Admission Confirmed | Welcome akshay!
+[2026-10-22 23:02:15] TO:akshay@gmail.com | Admission Confirmed | Welcome akshay!
+[2026-10-22 23:13:22] TO:aman@gmail.com | Admission Confirmed | Welcome aman!
+[2026-10-22 23:22:35] TO:aman@gmail.com | Fee Payment Received | ₹25000 via UPI on 2026-10-22. 
+[2026-10-22 23:30:49] TO:aman@gmail.com | Fee Payment Received | ₹10000 via Cash on 2026-10-22. 

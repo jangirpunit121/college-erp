@@ -1,0 +1,26 @@
+[
+  {
+    "student_id": "STU0003",
+    "name": "aman",
+    "course": "BSC",
+    "semester": 1,
+    "amount": 25000,
+    "mode": "UPI",
+    "date": "2026-10-22",
+    "note": "",
+    "recorded_by": "Super Admin",
+    "time": "2026-10-22 23:22:35"
+  },
+  {
+    "student_id": "STU0003",
+    "name": "aman",
+    "course": "BSC",
+    "semester": 1,
+    "amount": 10000,
+    "mode": "Cash",
+    "date": "2026-10-22",
+    "note": "",
+    "recorded_by": "Super Admin",
+    "time": "2026-10-22 23:30:49"
+  }
+]

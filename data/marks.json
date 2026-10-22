@@ -1,0 +1,16 @@
+[
+  {
+    "course": "BSC",
+    "semester": 1,
+    "subject": "BSC101",
+    "subject_name": "Physics",
+    "student_id": "STU0003",
+    "name": "aman",
+    "exam": "Internal",
+    "obtained": 50,
+    "total": 100,
+    "remark": "",
+    "by": "Rahul",
+    "time": "2026-10-22 23:26:29"
+  }
+]
