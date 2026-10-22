@@ -228,56 +228,49 @@ hr { border: none; border-top: 1px solid #dbe3ef; margin: 1.4rem 0; }
 .stMarkdown a { color: #4338ca !important; text-decoration: underline; }
 @media (max-width: 768px) { .block-container { padding: 1rem .8rem 2rem !important; } .metric-card { padding: 18px 12px; } .fee-card { padding: 18px; } }
 
-/* FIX: remove unwanted black backgrounds from headings and option boxes */
-.stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5, .stApp h6,
-[data-testid="stHeading"], [data-testid="stHeading"] *,
-[data-testid="stMarkdownContainer"] h1, [data-testid="stMarkdownContainer"] h2,
-[data-testid="stMarkdownContainer"] h3, [data-testid="stMarkdownContainer"] h4,
-[data-testid="stMarkdownContainer"] h5, [data-testid="stMarkdownContainer"] h6 {
-  background: transparent !important;
-  background-color: transparent !important;
-  color: #111827 !important;
-  -webkit-text-fill-color: #111827 !important;
-}
-/* Select/dropdown closed boxes */
-[data-testid="stSelectbox"] [data-baseweb="select"] > div,
-[data-testid="stMultiSelect"] [data-baseweb="select"] > div,
-[data-testid="stRadio"] [role="radiogroup"],
-[data-testid="stCheckbox"] label,
-[data-testid="stTextInput"] input,
-[data-testid="stNumberInput"] input,
-[data-testid="stTextArea"] textarea,
-[data-testid="stDateInput"] input,
-[data-testid="stTimeInput"] input {
+
+/* FINAL OVERRIDE: remove colored backgrounds throughout the ERP */
+html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"],
+[data-testid="stSidebar"], [data-testid="stVerticalBlockBorderWrapper"],
+[data-testid="stForm"], [data-testid="stExpander"], [data-testid="stExpanderDetails"],
+.stTabs [data-baseweb="tab-list"], .stTabs [data-baseweb="tab"],
+.streamlit-expanderHeader, .streamlit-expanderContent, .stAlert,
+.stSuccess, .stError, .stInfo, .stWarning,
+.metric-card, .fee-card, .role-badge, .info-card,
+[data-testid="stMetric"], [data-testid="stDataFrame"],
+[data-testid="stFileUploader"] section,
+[data-baseweb="popover"], [data-baseweb="menu"], [data-baseweb="listbox"],
+[data-baseweb="popover"] ul, [data-baseweb="popover"] li,
+[data-baseweb="select"] > div, [data-baseweb="input"], [data-baseweb="textarea"],
+.stTextInput input, .stNumberInput input, .stTextArea textarea,
+.stDateInput input, .stTimeInput input,
+.stButton > button, .stFormSubmitButton > button, .stDownloadButton > button,
+[data-testid="stSidebar"] .stButton > button,
+[role="option"], [role="listbox"] {
+  background: #ffffff !important;
   background-color: #ffffff !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+/* Keep every label, heading, card and control readable on plain white */
+.main-header, .main-header *, .metric-card, .metric-card *, .fee-card, .fee-card *,
+.role-badge, .info-card, .info-card *, h1, h2, h3, h4, h5, h6,
+.stMarkdown, .stMarkdown *, [data-testid="stSidebar"], [data-testid="stSidebar"] *,
+.stTabs [data-baseweb="tab"], .stTabs [data-baseweb="tab"] *,
+.stButton > button, .stFormSubmitButton > button, .stDownloadButton > button,
+.stButton > button *, .stFormSubmitButton > button *, .stDownloadButton > button * {
   color: #172033 !important;
   -webkit-text-fill-color: #172033 !important;
 }
-/* Dropdown menu and each option */
-[data-baseweb="popover"], [data-baseweb="popover"] > div,
-[data-baseweb="menu"], [data-baseweb="listbox"],
-[role="listbox"], [role="option"],
-[data-baseweb="menu"] li, [data-baseweb="listbox"] li {
-  background-color: #ffffff !important;
-  color: #172033 !important;
-  -webkit-text-fill-color: #172033 !important;
+.stButton > button, .stFormSubmitButton > button, .stDownloadButton > button,
+[data-testid="stSidebar"] .stButton > button {
+  border: 1px solid #cbd5e1 !important;
+  border-radius: 10px !important;
 }
-[role="option"]:hover, [role="option"][aria-selected="true"],
-[data-baseweb="menu"] li:hover, [data-baseweb="listbox"] li:hover {
-  background-color: #eef2ff !important;
-  color: #312e81 !important;
-  -webkit-text-fill-color: #312e81 !important;
-}
-/* Avoid dark heading/label surfaces inside forms, tabs, and expanders */
-[data-testid="stForm"], [data-testid="stExpander"],
-[data-testid="stExpander"] summary, .stTabs [data-baseweb="tab-list"],
-.stTabs [data-baseweb="tab"] {
-  color: #172033 !important;
-}
-[data-testid="stExpander"] summary,
-[data-testid="stExpander"] [data-testid="stExpanderDetails"] {
-  background-color: #ffffff !important;
-}
+[data-testid="stSidebar"] { border-right: 1px solid #e5e7eb !important; }
+[data-testid="stSidebar"] * { color: #172033 !important; -webkit-text-fill-color: #172033 !important; }
+.stTabs [aria-selected="true"] { border-bottom: 2px solid #64748b !important; }
+[role="option"]:hover, [data-baseweb="menu"] li:hover { background: #f3f4f6 !important; }
 
 </style>
 """, unsafe_allow_html=True)
