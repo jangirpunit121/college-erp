@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-import json, os, uuid, hashlib, shutil, zipfile, re
+import json, os, uuid, hashlib, shutil, zipfile, re, sqlite3, io
 from datetime import datetime, date
 import calendar
 from pathlib import Path
@@ -19,16 +19,47 @@ FILES = {k: DATA_DIR/f"{k}.json" for k in [
     "papers","announcements","fee_structure","courses","notices",
     "activity_log"]}
 
+DB_PATH = DATA_DIR / "college_erp.db"
+
+def db_connect():
+    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn.execute("CREATE TABLE IF NOT EXISTS app_data (data_key TEXT PRIMARY KEY, payload TEXT NOT NULL, updated_at TEXT NOT NULL)")
+    return conn
+
 def load(key, default=None):
     if default is None:
-        default = {} if key=="fee_structure" else []
-    if FILES[key].exists():
-        try: return json.loads(FILES[key].read_text(encoding="utf-8"))
-        except: return default
-    return default
+        default = {} if key == "fee_structure" else []
+    with db_connect() as conn:
+        row = conn.execute("SELECT payload FROM app_data WHERE data_key=?", (key,)).fetchone()
+        if row:
+            try:
+                return json.loads(row[0])
+            except (ValueError, TypeError):
+                return default
+        # One-time import of existing JSON data so current installations keep their data.
+        if FILES[key].exists():
+            try:
+                data = json.loads(FILES[key].read_text(encoding="utf-8"))
+            except (ValueError, OSError):
+                data = default
+        else:
+            data = default
+        conn.execute(
+            "INSERT OR IGNORE INTO app_data(data_key,payload,updated_at) VALUES(?,?,?)",
+            (key, json.dumps(data, default=str), datetime.now().isoformat(timespec="seconds"))
+        )
+        return data
 
 def save(key, data):
-    FILES[key].write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
+    payload = json.dumps(data, indent=2, default=str)
+    with db_connect() as conn:
+        conn.execute(
+            "INSERT INTO app_data(data_key,payload,updated_at) VALUES(?,?,?) "
+            "ON CONFLICT(data_key) DO UPDATE SET payload=excluded.payload, updated_at=excluded.updated_at",
+            (key, payload, datetime.now().isoformat(timespec="seconds"))
+        )
+    # Keep a readable JSON mirror for manual backup / compatibility; SQLite is the primary store.
+    FILES[key].write_text(payload, encoding="utf-8")
 
 def hpw(p): return hashlib.sha256(p.encode()).hexdigest()
 def now(): return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -89,7 +120,9 @@ def login_user(u,p):
 
 def logout():
     log_activity("Logout")
-    st.session_state.logged_in=False; st.session_state.user=None; st.rerun()
+    st.session_state.logged_in=False
+    st.session_state.user=None
+    st.rerun()
 
 def is_pg_course(course_code):
     c = next((x for x in load("courses") if x["code"]==course_code), None)
@@ -112,8 +145,32 @@ st.markdown("""
 html, body, [class*="css"], * { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
 .stApp { background: linear-gradient(180deg, #f8fafc 0%, #f1f5ff 100%) !important; color: var(--ink) !important; }
 [data-testid="stAppViewContainer"], [data-testid="stMain"] { color: var(--ink) !important; }
-#MainMenu, footer, header { visibility: hidden; }
-.block-container { padding: 1.5rem clamp(1rem, 3vw, 2.5rem) 3rem !important; max-width: 1480px; }
+#MainMenu, footer { visibility: hidden; }
+/* Keep Streamlit's native header and sidebar expand/collapse controls working. */
+header { visibility: visible !important; }
+[data-testid="stToolbar"] { visibility: visible !important; }
+.block-container { padding: 3rem clamp(1rem, 2.5vw, 2rem) 3.5rem !important; max-width: 1680px; width: 100%; }
+/* Let long forms, tables and reports fit without clipping */
+[data-testid="stMetric"] { min-width: 0 !important; overflow: visible !important; }
+[data-testid="stMetricLabel"], [data-testid="stMetricLabel"] > div,
+[data-testid="stMetricValue"], [data-testid="stMetricValue"] > div {
+  white-space: normal !important; overflow: visible !important;
+  text-overflow: clip !important; overflow-wrap: anywhere !important;
+  word-break: break-word !important; line-height: 1.2 !important;
+}
+[data-testid="stMetricValue"] { font-size: clamp(1rem, 1.7vw, 1.8rem) !important; }
+[data-testid="stMetricLabel"] { font-size: clamp(.72rem, 1vw, .95rem) !important; }
+
+[data-testid="stMainBlockContainer"] { overflow: visible !important; }
+[data-testid="stDataFrame"], [data-testid="stTable"] { max-width: 100% !important; }
+[data-testid="stHorizontalBlock"] { gap: 1rem !important; align-items: flex-start !important; }
+[data-testid="stVerticalBlockBorderWrapper"] { min-width: 0 !important; }
+pre, code { white-space: pre-wrap !important; overflow-wrap: anywhere !important; }
+@media (max-width: 900px) {
+  .block-container { padding: 2.5rem .8rem 2.5rem !important; }
+  [data-testid="stHorizontalBlock"] { flex-wrap: wrap !important; }
+  [data-testid="stHorizontalBlock"] > [data-testid="column"] { min-width: min(100%, 280px) !important; }
+}
 
 /* Global contrast: force readable dark text on light surfaces */
 .stMarkdown, .stMarkdown p, .stMarkdown li, .stMarkdown span,
@@ -179,6 +236,8 @@ h1, h2, h3, h4, h5, h6 { color: #111827 !important; font-weight: 800 !important;
 .stDownloadButton > button { background: linear-gradient(135deg, #047857, #059669) !important; color: #fff !important; -webkit-text-fill-color: #fff !important; border: 0 !important; border-radius: 11px !important; font-weight: 750 !important; }
 .stDownloadButton > button * { color: #fff !important; -webkit-text-fill-color: #fff !important; }
 
+
+/* Do not set sidebar width/visibility here: Streamlit must control its open/closed state. */
 /* Dark sidebar with readable light text */
 [data-testid="stSidebar"] { background: linear-gradient(180deg, #111827 0%, #1e1b4b 58%, #312e81 100%) !important; border-right: 1px solid rgba(255,255,255,.08); }
 [data-testid="stSidebar"] * { color: #eef2ff !important; }
@@ -203,7 +262,6 @@ h1, h2, h3, h4, h5, h6 { color: #111827 !important; font-weight: 800 !important;
 .info-card, .info-card * { color: #172033 !important; }
 .info-card:hover { border-color: #a5b4fc; box-shadow: 0 5px 16px rgba(99,102,241,.09); }
 hr { border: none; border-top: 1px solid #dbe3ef; margin: 1.4rem 0; }
-/* Admission and profile forms: force readable foreground/background across widgets */
 [data-testid="stForm"], [data-testid="stExpander"] [data-testid="stExpanderDetails"] { color: #172033 !important; }
 [data-testid="stForm"] label, [data-testid="stForm"] p,
 [data-testid="stExpander"] label, [data-testid="stExpander"] p,
@@ -226,51 +284,7 @@ hr { border: none; border-top: 1px solid #dbe3ef; margin: 1.4rem 0; }
 [data-testid="stDataFrame"] { background: #ffffff !important; }
 [data-testid="stMetric"] { background: #ffffff; padding: 14px; border: 1px solid #dbe3ef; border-radius: 12px; }
 .stMarkdown a { color: #4338ca !important; text-decoration: underline; }
-@media (max-width: 768px) { .block-container { padding: 1rem .8rem 2rem !important; } .metric-card { padding: 18px 12px; } .fee-card { padding: 18px; } }
-
-
-/* FINAL OVERRIDE: remove colored backgrounds throughout the ERP */
-html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"],
-[data-testid="stSidebar"], [data-testid="stVerticalBlockBorderWrapper"],
-[data-testid="stForm"], [data-testid="stExpander"], [data-testid="stExpanderDetails"],
-.stTabs [data-baseweb="tab-list"], .stTabs [data-baseweb="tab"],
-.streamlit-expanderHeader, .streamlit-expanderContent, .stAlert,
-.stSuccess, .stError, .stInfo, .stWarning,
-.metric-card, .fee-card, .role-badge, .info-card,
-[data-testid="stMetric"], [data-testid="stDataFrame"],
-[data-testid="stFileUploader"] section,
-[data-baseweb="popover"], [data-baseweb="menu"], [data-baseweb="listbox"],
-[data-baseweb="popover"] ul, [data-baseweb="popover"] li,
-[data-baseweb="select"] > div, [data-baseweb="input"], [data-baseweb="textarea"],
-.stTextInput input, .stNumberInput input, .stTextArea textarea,
-.stDateInput input, .stTimeInput input,
-.stButton > button, .stFormSubmitButton > button, .stDownloadButton > button,
-[data-testid="stSidebar"] .stButton > button,
-[role="option"], [role="listbox"] {
-  background: #ffffff !important;
-  background-color: #ffffff !important;
-  background-image: none !important;
-  box-shadow: none !important;
-}
-/* Keep every label, heading, card and control readable on plain white */
-.main-header, .main-header *, .metric-card, .metric-card *, .fee-card, .fee-card *,
-.role-badge, .info-card, .info-card *, h1, h2, h3, h4, h5, h6,
-.stMarkdown, .stMarkdown *, [data-testid="stSidebar"], [data-testid="stSidebar"] *,
-.stTabs [data-baseweb="tab"], .stTabs [data-baseweb="tab"] *,
-.stButton > button, .stFormSubmitButton > button, .stDownloadButton > button,
-.stButton > button *, .stFormSubmitButton > button *, .stDownloadButton > button * {
-  color: #172033 !important;
-  -webkit-text-fill-color: #172033 !important;
-}
-.stButton > button, .stFormSubmitButton > button, .stDownloadButton > button,
-[data-testid="stSidebar"] .stButton > button {
-  border: 1px solid #cbd5e1 !important;
-  border-radius: 10px !important;
-}
-[data-testid="stSidebar"] { border-right: 1px solid #e5e7eb !important; }
-[data-testid="stSidebar"] * { color: #172033 !important; -webkit-text-fill-color: #172033 !important; }
-.stTabs [aria-selected="true"] { border-bottom: 2px solid #64748b !important; }
-[role="option"]:hover, [data-baseweb="menu"] li:hover { background: #f3f4f6 !important; }
+@media (max-width: 768px) { .metric-card { padding: 18px 12px; } .fee-card { padding: 18px; } }
 
 </style>
 """, unsafe_allow_html=True)
@@ -662,8 +676,61 @@ def admin_students():
         a.markdown(f"**Name**\n\n{student.get('name','—')}")
         b.markdown(f"**Email**\n\n{student.get('email','—')}")
         c.markdown(f"**Phone**\n\n{student.get('phone','—')}")
-        with st.expander("Complete saved profile data", expanded=False):
-            st.json(student)
+        with st.expander("Complete admission form / saved profile data (all fields)", expanded=True):
+            st.markdown("#### Student Profile")
+            basic_cols = st.columns(3)
+            basic_cols[0].markdown(f"**Student ID**  \\n{student.get('id','—')}")
+            basic_cols[1].markdown(f"**Name**  \\n{student.get('name','—')}")
+            basic_cols[2].markdown(f"**Email**  \\n{student.get('email','—')}")
+            detail_rows = []
+            for label, key in [("Phone","phone"),("Date of Birth","dob"),("Gender","gender"),
+                               ("Course / Class","course"),("Current Semester","semester"),
+                               ("Roll Number","roll_no"),("Admission Number","admission_no"),
+                               ("Batch / Academic Year","batch"),("Category","caste"),("Blood Group","blood"),
+                               ("Address","address")]:
+                val = student.get(key)
+                if isinstance(val, (dict, list)): val = json.dumps(val, ensure_ascii=False)
+                detail_rows.append({"Field": label, "Details": val if val not in (None, "") else "—"})
+            st.dataframe(pd.DataFrame(detail_rows), use_container_width=True, hide_index=True)
+            for section, title in [("family","Family Details"),("tenth","10th Education"),
+                                   ("twelfth","12th Education"),("graduation","Graduation"),
+                                   ("pg","Post-Graduation"),("docs","Other Documents")]:
+                value = student.get(section)
+                if value:
+                    with st.expander(title):
+                        if isinstance(value, dict):
+                            st.dataframe(pd.DataFrame([{"Field": str(k).replace("_"," ").title(),
+                                "Details": str(v) if v not in (None,"") else "—"} for k,v in value.items()
+                                if k != "doc"]), use_container_width=True, hide_index=True)
+                        else:
+                            st.write(value)
+            with st.expander("Advanced: Raw JSON (optional)"):
+                st.code(json.dumps(student, indent=2, ensure_ascii=False, default=str), language="json", wrap_lines=True)
+            st.download_button(
+                "⬇️ Download Complete Student Data (JSON)",
+                data=json.dumps(student, indent=2, ensure_ascii=False, default=str),
+                file_name=f"{sid}_complete_profile.json", mime="application/json",
+                key=f"student_json_download_{sid}"
+            )
+        st.markdown("#### 📂 Student Documents")
+        admin_doc_paths = {}
+        for section, title in [("tenth","10th Marksheet"),("twelfth","12th Marksheet"),
+                               ("graduation","Graduation Marksheet"),("pg","Post-Graduation Marksheet")]:
+            path = student.get(section, {}).get("doc")
+            if path: admin_doc_paths[title] = path
+        for key, path in student.get("docs", {}).items():
+            if path: admin_doc_paths[key.replace("_"," ").title()] = path
+        if admin_doc_paths:
+            doc_cols = st.columns(3)
+            for idx, (doc_title, path) in enumerate(admin_doc_paths.items()):
+                with doc_cols[idx % 3]:
+                    if os.path.exists(path):
+                        st.download_button(f"⬇️ {doc_title}", open(path,"rb").read(),
+                            Path(path).name, key=f"admin_doc_{sid}_{idx}")
+                    else:
+                        st.caption(f"{doc_title}: file missing")
+        else:
+            st.info("No uploaded documents found.")
 
     with tab_edit:
         st.info("Yahan basic profile aur academic details edit kar sakte hain. Baaki admission details/document paths ko jaisa hai waisa preserve kiya jayega.")
@@ -716,6 +783,38 @@ def admin_students():
                 st.success("Student profile update ho gayi.")
                 st.rerun()
 
+        st.markdown("#### 🧾 Advanced: Edit Complete Admission Form")
+        st.caption("Is editor se admission form ke nested fields bhi edit kar sakte hain. Document paths ko manually change na karein.")
+        with st.form(f"full_form_edit_{sid}"):
+            full_profile_json = st.text_area("Complete profile JSON", value=json.dumps(student, indent=2, ensure_ascii=False),
+                height=420, key=f"full_profile_json_{sid}")
+            save_full_profile = st.form_submit_button("💾 Save Complete Form")
+        if save_full_profile:
+            try:
+                updated_profile = json.loads(full_profile_json)
+                if updated_profile.get("id") != sid:
+                    st.error("Student ID change nahi kar sakte.")
+                elif not updated_profile.get("name") or not updated_profile.get("email"):
+                    st.error("Name aur email required hain.")
+                else:
+                    all_profiles = load("students")
+                    for idx, row in enumerate(all_profiles):
+                        if row.get("id") == sid:
+                            all_profiles[idx] = updated_profile
+                            break
+                    save("students", all_profiles)
+                    user_rows = load("users")
+                    for user_row in user_rows:
+                        if user_row.get("role") == "student" and user_row.get("ref") == sid:
+                            user_row["name"] = updated_profile.get("name", user_row.get("name"))
+                            user_row["email"] = updated_profile.get("email", user_row.get("email"))
+                    save("users", user_rows)
+                    log_activity("Complete admission form edited", sid)
+                    st.success("Complete admission form updated.")
+                    st.rerun()
+            except (json.JSONDecodeError, TypeError) as exc:
+                st.error(f"Valid JSON enter karein: {exc}")
+
     with tab_delete:
         st.warning(f"Student **{student.get('name','—')} ({sid})** ko delete karne par uska student login aur related fee/marks/attendance records bhi delete honge. Uploaded documents disk se automatically remove nahi honge.")
         confirm = st.checkbox("Main confirm karta/karti hoon ki is student ko delete karna hai.", key=f"confirm_delete_{sid}")
@@ -729,7 +828,6 @@ def admin_students():
             log_activity("Student deleted", f"{sid} — {student.get('name','')}")
             st.success(f"Student {sid} delete kar diya gaya.")
             st.rerun()
-
 
 # ============================================================
 # TEACHERS
@@ -994,63 +1092,180 @@ def admin_papers():
                 c2.download_button("⬇️ Download", open(p["file"],"rb").read(),
                                    Path(p["file"]).name, key=p["id"])
 
+# Main-exam filter: exclude internal, mid-term, quiz, assignment and practical records.
+def is_main_exam_record(record):
+    exam = str(record.get("exam", record.get("exam_type", ""))).strip().casefold()
+    main_exam_names = {"main exam", "main examination", "end-sem", "end sem", "end semester",
+                       "end-semester", "semester exam", "final exam", "final", "university exam",
+                       "annual exam", "annual"}
+    return exam in main_exam_names
+
 # ============================================================
 # REPORTS
 # ============================================================
 def admin_reports():
-    st.subheader("📊 Student Search & Reports")
+    st.subheader("📊 Student Reports, Marksheets & Documents")
     students = load("students")
-    q = st.text_input("🔎 Search by ID / Name / Email", key="rep_search")
-    if q:
-        results = [s for s in students if q.lower() in (s["id"]+s["name"]+s["email"]).lower()]
-        if not results: st.warning("No student found.")
-        for s in results:
-            with st.expander(f"🎓 {s['id']} — {s['name']} ({s['course']} Sem {s['semester']})", expanded=True):
-                st.markdown(f"**Email:** {s['email']} • **Phone:** {s.get('phone','-')}")
-                st.markdown(f"**Batch:** {s.get('batch','-')} • **Caste:** {s.get('caste','-')} • **Marital:** {s.get('marital','-')}")
-                st.markdown(f"**Subjects:** {', '.join(s.get('subjects',[])) or '-'}")
-                s_fee = s.get("fee", {})
-                if s_fee.get("total"):
-                    st.markdown(f"##### 💰 Fee (Admission)")
-                    st.write(f"Total: ₹{s_fee['total']} • Discount: ₹{s_fee.get('discount',0)} • Payable: ₹{s_fee.get('payable', s_fee['total']-s_fee.get('discount',0))}")
-                    if s_fee.get("remark"):
-                        st.caption(f"💡 {s_fee['remark']} (by {s_fee.get('applied_by','-')})")
-                st.markdown("##### 📘 10th Details")
-                t = s.get("tenth",{})
-                st.write(f"{t.get('board','-')} • {t.get('year','-')} • {t.get('obtained','-')}/{t.get('total','-')} • **{t.get('pct','-')}%**")
-                if t.get("doc") and os.path.exists(t["doc"]):
-                    st.download_button("⬇️ 10th", open(t["doc"],"rb").read(), Path(t["doc"]).name, key=f"t_{s['id']}")
-                st.markdown("##### 📗 12th Details")
-                tw = s.get("twelfth",{})
-                st.write(f"{tw.get('board','-')} • {tw.get('year','-')} • {tw.get('stream','-')} • {tw.get('obtained','-')}/{tw.get('total','-')} • **{tw.get('pct','-')}%**")
-                if tw.get("doc") and os.path.exists(tw["doc"]):
-                    st.download_button("⬇️ 12th", open(tw["doc"],"rb").read(), Path(tw["doc"]).name, key=f"tw_{s['id']}")
-                st.markdown("##### 🎓 Graduation")
-                g = s.get("graduation",{})
-                st.write(f"{g.get('degree','-')} • {g.get('univ','-')} • {g.get('year','-')} • {g.get('obtained','-')}/{g.get('total','-')} • **{g.get('pct','-')}%**")
-                if g.get("doc") and os.path.exists(g["doc"]):
-                    st.download_button("⬇️ Grad", open(g["doc"],"rb").read(), Path(g["doc"]).name, key=f"gd_{s['id']}")
-                st.markdown("##### 📄 All Documents")
-                for k,v in s.get("docs",{}).items():
-                    if v and os.path.exists(v):
-                        st.download_button(f"⬇️ {k}", open(v,"rb").read(), Path(v).name, key=f"d_{s['id']}_{k}")
-                fam = s.get("family",{})
-                st.markdown("##### 👨‍👩‍👦 Family")
-                st.write(f"Father: {fam.get('father','-')} • Mother: {fam.get('mother','-')} • Guardian: {fam.get('guardian','-')}")
-                fr = load("fee_structure").get(f"{s['course']}|{s['semester']}", {})
-                payable = s.get("fee",{}).get("payable", fr.get("payable", fr.get("total",0)-fr.get("discount",0)))
-                paid = sum(f["amount"] for f in load("fees") if f["student_id"]==s["id"])
-                c1,c2,c3 = st.columns(3)
-                c1.metric("Payable", f"₹{payable}"); c2.metric("Paid", f"₹{paid}"); c3.metric("Due", f"₹{max(payable-paid,0)}")
-                st.markdown("##### 📝 Marks")
-                marks = [m for m in load("marks") if m["student_id"]==s["id"]]
-                if marks: st.dataframe(pd.DataFrame(marks), use_container_width=True)
-                st.markdown("##### ✅ Attendance")
-                att = [a for a in load("attendance") if a["student_id"]==s["id"]]
-                if att: st.dataframe(pd.DataFrame(att), use_container_width=True)
-                st.markdown("##### 🧾 Payment History")
-                pays = [f for f in load("fees") if f["student_id"]==s["id"]]
-                if pays: st.dataframe(pd.DataFrame(pays), use_container_width=True)
+    if not students:
+        st.info("Abhi student data available nahi hai.")
+        return
+
+    q = st.text_input("🔎 Search by Student ID / Name / Email / Phone", key="rep_search")
+    course_options = ["All"] + sorted({str(x.get("course", "-")) for x in students})
+    course_filter = st.selectbox("Filter course", course_options, key="rep_course_filter")
+    results = [s for s in students if (not q or q.casefold() in " ".join(str(s.get(k, "")) for k in ("id", "name", "email", "phone")).casefold())
+               and (course_filter == "All" or str(s.get("course", "-")) == course_filter)]
+    st.caption(f"Total students: {len(students)} · Showing: {len(results)}")
+    if not results:
+        st.warning("Is search/filter se koi student nahi mila.")
+        return
+
+    # Overview download for the selected search results.
+    overview_rows = []
+    all_marks = load("marks")
+    all_fees = load("fees")
+    all_attendance = load("attendance")
+    fee_structures = load("fee_structure")
+    for st_rec in results:
+        sid = str(st_rec.get("id", ""))
+        student_marks = [m for m in all_marks if str(m.get("student_id", "")) == sid]
+        paid = sum(float(f.get("amount", 0) or 0) for f in all_fees if str(f.get("student_id", "")) == sid)
+        fs = fee_structures.get(f"{st_rec.get('course','')}|{st_rec.get('semester','')}", {})
+        fee = st_rec.get("fee", {}) or {}
+        payable = float(fee.get("payable", fs.get("payable", fs.get("total", 0) - fs.get("discount", 0))) or 0)
+        overview_rows.append({"student_id": sid, "name": st_rec.get("name", ""), "email": st_rec.get("email", ""),
+            "phone": st_rec.get("phone", ""), "course": st_rec.get("course", ""), "current_semester": st_rec.get("semester", ""),
+            "batch": st_rec.get("batch", ""), "marks_records": len(student_marks), "fee_payable": payable,
+            "fee_paid": paid, "fee_due": max(payable-paid, 0),
+            "attendance_records": sum(1 for a in all_attendance if str(a.get("student_id", "")) == sid)})
+    overview_df = pd.DataFrame(overview_rows)
+    st.download_button("⬇️ Download Filtered Student Report (CSV)", overview_df.to_csv(index=False),
+        "student_report.csv", "text/csv", key="reports_overview_csv")
+    st.dataframe(overview_df, use_container_width=True, hide_index=True)
+
+    for s in results:
+        sid = str(s.get("id", ""))
+        with st.expander(f"🎓 {sid} — {s.get('name','Unnamed')} · {s.get('course','-')} · Current Semester {s.get('semester','-')}", expanded=(len(results) == 1)):
+            tab_summary, tab_marks, tab_docs, tab_json = st.tabs(["📋 Summary & Fees", "📝 Marksheets", "📂 Documents", "🧾 Complete Data JSON"])
+            with tab_summary:
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Student ID", sid or "—")
+                c2.metric("Course", str(s.get("course", "—")))
+                c3.metric("Current Semester", str(s.get("semester", "—")))
+                c4.metric("Batch", str(s.get("batch", "—")))
+                st.markdown(
+                    f"**Name:** {s.get('name','-')}  \
+"
+                    f"**Email:** {s.get('email','-')}  \
+"
+                    f"**Phone:** {s.get('phone','-')}  \
+"
+                    f"**Date of Birth:** {s.get('dob','-')}  \
+"
+                    f"**Gender:** {s.get('gender','-')}"
+                )
+                fam = s.get("family", {}) or {}
+                st.write(f"**Father:** {fam.get('father','-')} · **Mother:** {fam.get('mother','-')} · **Guardian:** {fam.get('guardian','-')}")
+                for sec, title in [("tenth", "10th"), ("twelfth", "12th"), ("graduation", "Graduation"), ("pg", "Post-Graduation")]:
+                    rec = s.get(sec, {}) or {}
+                    if rec:
+                        st.markdown(f"**{title}:** {rec.get('degree', rec.get('board','-'))} · {rec.get('univ', rec.get('school','-'))} · Year {rec.get('year','-')} · Marks {rec.get('obtained','-')}/{rec.get('total','-')} · {rec.get('pct','-')}%")
+                fee = s.get("fee", {}) or {}
+                fs = fee_structures.get(f"{s.get('course','')}|{s.get('semester','')}", {})
+                payable = float(fee.get("payable", fs.get("payable", fs.get("total", 0) - fs.get("discount", 0))) or 0)
+                paid_rows = [f for f in all_fees if str(f.get("student_id", "")) == sid]
+                paid = sum(float(f.get("amount", 0) or 0) for f in paid_rows)
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Payable", f"₹{payable:,.0f}")
+                c2.metric("Paid", f"₹{paid:,.0f}")
+                c3.metric("Due", f"₹{max(payable-paid, 0):,.0f}")
+                if paid_rows:
+                    st.markdown("**Payment history**")
+                    st.dataframe(pd.DataFrame(paid_rows), use_container_width=True, hide_index=True)
+                att_rows = [a for a in all_attendance if str(a.get("student_id", "")) == sid]
+                if att_rows:
+                    st.markdown("**Attendance records**")
+                    st.dataframe(pd.DataFrame(att_rows), use_container_width=True, hide_index=True)
+
+            with tab_marks:
+                student_marks = [m for m in all_marks if str(m.get("student_id", "")) == sid]
+                if not student_marks:
+                    st.info("Is student ke Main Exam / End-Sem marks enter nahi hue. Internal, Mid-Term, Quiz, Assignment aur Practical marks ko main marksheet mein include nahi kiya jayega.")
+                else:
+                    marks_df = pd.DataFrame(student_marks)
+                    if "semester" not in marks_df.columns:
+                        marks_df["semester"] = s.get("semester", 1)
+                    sems = sorted({int(m.get("semester", s.get("semester", 1)) or 1) for m in student_marks})
+                    st.dataframe(marks_df, use_container_width=True, hide_index=True)
+                    chosen_sem = st.selectbox("Select semester marksheet", sems,
+                        index=(sems.index(int(s.get("semester", sems[-1]))) if int(s.get("semester", sems[-1]) or sems[-1]) in sems else len(sems)-1),
+                        key=f"report_marks_sem_{sid}")
+                    sem_marks = [m for m in student_marks if int(m.get("semester", s.get("semester", 1)) or 1) == int(chosen_sem)]
+                    sem_df = pd.DataFrame(sem_marks)
+                    st.download_button(f"⬇️ Download Semester {chosen_sem} Marks (CSV)", sem_df.to_csv(index=False),
+                        f"{sid}_semester_{chosen_sem}_marks.csv", "text/csv", key=f"report_marks_csv_{sid}_{chosen_sem}")
+                    try:
+                        from reportlab.lib.pagesizes import A4, landscape
+                        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+                        from reportlab.lib import colors
+                        from reportlab.lib.styles import getSampleStyleSheet
+                        pdf_buffer = io.BytesIO()
+                        doc = SimpleDocTemplate(pdf_buffer, pagesize=landscape(A4), rightMargin=28, leftMargin=28, topMargin=32, bottomMargin=32)
+                        styles = getSampleStyleSheet()
+                        story = [Paragraph("MAIN EXAMINATION MARKSHEET", styles["Title"]), Spacer(1, 12),
+                            Paragraph(f"Student Name: {s.get('name','-')} | Student ID: {sid}", styles["Normal"]),
+                            Paragraph(f"Class / Course: {s.get('course', s.get('class_name','-'))} | Semester: {chosen_sem} | Roll Number: {s.get('roll_no', s.get('roll_number','-'))}", styles["Normal"]),
+                            Paragraph(f"Father's Name: {(s.get('family', {}) or {}).get('father', s.get('father_name','-'))} | Academic Year / Batch: {s.get('batch', s.get('academic_year','-'))}", styles["Normal"]),
+                            Paragraph(f"Date of Birth: {s.get('dob','-')} | Exam: Main Examination / End-Semester", styles["Normal"]), Spacer(1, 12)]
+                        table_data = [["Subject", "Exam", "Obtained", "Maximum", "Remark"]]
+                        total_obtained = 0.0; total_max = 0.0
+                        for m in sem_marks:
+                            table_data.append([str(m.get("subject_name", m.get("subject", "-"))), str(m.get("exam", "-")),
+                                str(m.get("obtained", "-")), str(m.get("total", "-")), str(m.get("remark", "") or "-")])
+                            try: total_obtained += float(m.get("obtained", 0) or 0); total_max += float(m.get("total", 0) or 0)
+                            except (TypeError, ValueError): pass
+                        table_data.append(["TOTAL", "", f"{total_obtained:g}", f"{total_max:g}", f"Percentage: {(total_obtained/total_max*100):.2f}%" if total_max else "Percentage: -"])
+                        tbl = Table(table_data, repeatRows=1, colWidths=[260, 120, 85, 85, 150])
+                        tbl.setStyle(TableStyle([("BACKGROUND", (0,0),(-1,0),colors.HexColor("#4338ca")),
+                            ("TEXTCOLOR",(0,0),(-1,0),colors.white), ("GRID",(0,0),(-1,-1),0.5,colors.grey),
+                            ("VALIGN",(0,0),(-1,-1),"TOP"), ("PADDING",(0,0),(-1,-1),6),
+                            ("BACKGROUND",(0,-1),(-1,-1),colors.HexColor("#eef2ff"))]))
+                        story.append(tbl)
+                        story.append(Spacer(1, 10))
+                        story.append(Paragraph("Note: This is an application-generated marks report, not an official university marksheet.", styles["Italic"]))
+                        doc.build(story)
+                        st.download_button(f"⬇️ Download Semester {chosen_sem} Marksheet (PDF)", pdf_buffer.getvalue(),
+                            f"{sid}_semester_{chosen_sem}_marksheet.pdf", "application/pdf", key=f"report_marks_pdf_{sid}_{chosen_sem}")
+                    except ImportError:
+                        st.warning("PDF download ke liye reportlab install karein: pip install reportlab")
+
+            with tab_docs:
+                docs = {}
+                for section, title in [("tenth", "10th Marksheet"), ("twelfth", "12th Marksheet"),
+                    ("graduation", "Graduation Marksheet"), ("pg", "Post-Graduation Marksheet")]:
+                    path = (s.get(section, {}) or {}).get("doc")
+                    if path: docs[title] = path
+                docs.update({str(k).replace("_", " ").title(): v for k, v in (s.get("docs", {}) or {}).items() if v})
+                if not docs:
+                    st.info("Koi document path saved nahi hai.")
+                else:
+                    doc_cols = st.columns(3)
+                    for idx, (title, path) in enumerate(docs.items()):
+                        with doc_cols[idx % 3]:
+                            if path and os.path.isfile(path):
+                                st.download_button(f"⬇️ {title}", open(path, "rb").read(), Path(path).name,
+                                    key=f"report_doc_{sid}_{idx}", use_container_width=True)
+                            else:
+                                st.warning(f"{title}: saved path par file nahi mili.")
+                st.markdown("**Saved document paths**")
+                st.json({str(k): v for k, v in docs.items()}, expanded=True)
+
+            with tab_json:
+                st.caption("Complete stored student record. Nested admission details aur document paths bhi included hain.")
+                student_json = json.dumps(s, indent=2, ensure_ascii=False, default=str)
+                st.code(student_json, language="json", wrap_lines=True)
+                st.download_button("⬇️ Download Complete Student JSON", student_json,
+                    f"{sid}_complete_student_data.json", "application/json", key=f"report_json_{sid}")
 
 # ============================================================
 # BACKUP
@@ -1137,7 +1352,6 @@ def teacher_home():
         st.warning("No subjects assigned. Ask Admin to assign your subjects.")
         return
 
-    # Filter first by course and semester, then subject and only then students.
     courses = sorted(set(x.get("course", "") for x in assigned))
     fc1, fc2, fc3 = st.columns([1, 1, 2])
     course = fc1.selectbox("🎓 Select Course / Class", courses, key="teach_course")
@@ -1153,7 +1367,7 @@ def teacher_home():
                 if x.get("course") == course and int(x.get("semester", 0) or 0) == int(semester)
                 and chosen in x.get("subjects", [])]
     st.caption(f"Showing {len(students)} students • {course} / Semester {semester} • {subject_rec['name']} ({chosen})")
-    tab1, tab2, tab3, tab4 = st.tabs(["👥 Students", "✅ Attendance", "📝 Marks", "📄 Papers"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["👥 Students", "✅ Attendance", "📝 Marks", "📄 Papers", "💰 All Students Fees"])
 
     with tab1:
         st.markdown("#### Class Students")
@@ -1298,6 +1512,35 @@ def teacher_home():
                     if paper.get("file") and os.path.exists(paper["file"]):
                         st.download_button("⬇️ Download", open(paper["file"], "rb").read(), Path(paper["file"]).name, key=f"download_{paper['id']}")
 
+    with tab5:
+        st.markdown("#### 💰 Fee Status — All Students")
+        all_students = load("students")
+        fee_rows = []
+        fee_records = load("fees")
+        fee_structures = load("fee_structure")
+        for stu in all_students:
+            stu_fee = stu.get("fee", {})
+            structure = fee_structures.get(f"{stu.get('course')}|{stu.get('semester')}", {})
+            total_fee = stu_fee.get("total", structure.get("total", 0))
+            discount = stu_fee.get("discount", structure.get("discount", 0))
+            payable = stu_fee.get("payable", structure.get("payable", total_fee-discount))
+            paid = sum(int(f.get("amount", 0)) for f in fee_records if f.get("student_id") == stu.get("id"))
+            due = max(int(payable or 0)-paid, 0)
+            fee_rows.append({"Student ID":stu.get("id"), "Name":stu.get("name"),
+                "Course":stu.get("course"), "Semester":stu.get("semester"),
+                "Payable":payable, "Paid":paid, "Due":due,
+                "Status":"Paid" if due == 0 else ("Partial" if paid else "Pending")})
+        if fee_rows:
+            fee_df = pd.DataFrame(fee_rows)
+            fee_search = st.text_input("Search student by name / ID / course", key="teacher_fee_search").lower().strip()
+            if fee_search:
+                fee_df = fee_df[fee_df.astype(str).apply(lambda col: col.str.lower().str.contains(fee_search, regex=False)).any(axis=1)]
+            st.dataframe(fee_df, use_container_width=True, hide_index=True)
+            st.download_button("⬇️ Download Fee Status CSV", fee_df.to_csv(index=False),
+                "all_students_fee_status.csv", "text/csv", key="teacher_fee_csv")
+        else:
+            st.info("No student records available.")
+
 # ============================================================
 # STUDENT
 # ============================================================
@@ -1323,19 +1566,63 @@ def student_home():
         st.write(f"{tw.get('board','-')} • {tw.get('year','-')} • {tw.get('stream','-')} • {tw.get('obtained','-')}/{tw.get('total','-')} • **{tw.get('pct','-')}%**")
         if tw.get("doc") and os.path.exists(tw["doc"]):
             st.download_button("⬇️ 12th", open(tw["doc"],"rb").read(), Path(tw["doc"]).name, key="s_tw")
-        st.markdown("##### 📄 Documents")
-        for k,v in me.get("docs",{}).items():
-            if v and os.path.exists(v):
-                st.download_button(f"⬇️ {k}", open(v,"rb").read(), Path(v).name, key=f"doc_{k}")
+        st.markdown("##### 📄 All Documents")
+        document_paths = {}
+        for section, title in [("graduation", "Graduation Marksheet"), ("pg", "Post-Graduation Marksheet")]:
+            record = me.get(section, {})
+            if record.get("doc"):
+                document_paths[title] = record["doc"]
+        document_paths.update({k.replace("_", " ").title(): v for k, v in me.get("docs", {}).items() if v})
+        for idx, (doc_title, path) in enumerate(document_paths.items()):
+            if path and os.path.exists(path):
+                st.download_button(f"⬇️ Download {doc_title}", open(path,"rb").read(),
+                    Path(path).name, key=f"student_doc_{sid}_{idx}")
     with tab2:
         subs = load("subjects")
         mine = [s for s in subs if s["code"] in me.get("subjects",[])]
         if mine: st.dataframe(pd.DataFrame(mine), use_container_width=True)
         else: st.info("No subjects.")
     with tab3:
-        marks=[m for m in load("marks") if m["student_id"]==sid]
-        if marks: st.dataframe(pd.DataFrame(marks), use_container_width=True)
-        else: st.info("No marks yet.")
+        marks=[m for m in load("marks") if m.get("student_id")==sid and is_main_exam_record(m)]
+        if marks:
+            marks_df = pd.DataFrame(marks)
+            st.dataframe(marks_df, use_container_width=True, hide_index=True)
+            semesters_with_marks = sorted({int(m.get("semester", me.get("semester", 1)) or 1) for m in marks})
+            st.markdown("#### 📄 Download Semester Marksheet")
+            chosen_marks_sem = st.selectbox("Select semester", semesters_with_marks, key=f"marksheet_sem_{sid}")
+            sem_marks = [m for m in marks if int(m.get("semester", me.get("semester", 1)) or 1) == int(chosen_marks_sem)]
+            csv_data = pd.DataFrame(sem_marks).to_csv(index=False)
+            st.download_button(f"⬇️ Download Semester {chosen_marks_sem} Marksheet (CSV)",
+                csv_data, f"{sid}_semester_{chosen_marks_sem}_marksheet.csv", "text/csv",
+                key=f"marksheet_csv_{sid}_{chosen_marks_sem}")
+            try:
+                from reportlab.lib.pagesizes import A4
+                from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+                from reportlab.lib import colors
+                from reportlab.lib.styles import getSampleStyleSheet
+                pdf_buffer = io.BytesIO()
+                doc = SimpleDocTemplate(pdf_buffer, pagesize=A4)
+                styles = getSampleStyleSheet()
+                story = [Paragraph("COLLEGE SEMESTER MARKSHEET", styles["Title"]), Spacer(1, 12),
+                    Paragraph(f"Student: {me.get('name','-')} ({sid})", styles["Normal"]),
+                    Paragraph(f"Course: {me.get('course','-')} | Semester: {chosen_marks_sem}", styles["Normal"]), Spacer(1, 12)]
+                table_data = [["Subject", "Exam", "Obtained", "Maximum", "Remark"]]
+                for m in sem_marks:
+                    table_data.append([str(m.get("subject_name",m.get("subject","-"))), str(m.get("exam","-")),
+                        str(m.get("obtained","-")), str(m.get("total","-")), str(m.get("remark","") or "-")])
+                tbl = Table(table_data, repeatRows=1, colWidths=[150, 85, 65, 65, 100])
+                tbl.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#4338ca")),
+                    ("TEXTCOLOR",(0,0),(-1,0),colors.white),("GRID",(0,0),(-1,-1),0.5,colors.grey),
+                    ("VALIGN",(0,0),(-1,-1),"TOP"),("PADDING",(0,0),(-1,-1),6)]))
+                story.append(tbl)
+                doc.build(story)
+                st.download_button(f"⬇️ Download Semester {chosen_marks_sem} Marksheet (PDF)",
+                    pdf_buffer.getvalue(), f"{sid}_semester_{chosen_marks_sem}_marksheet.pdf",
+                    "application/pdf", key=f"marksheet_pdf_{sid}_{chosen_marks_sem}")
+            except ImportError:
+                st.info("PDF generation ke liye reportlab install karein: pip install reportlab")
+        else:
+            st.info("No marks yet. Semester marksheet marks enter hone ke baad available hogi.")
     with tab4:
         st.markdown("#### 📅 Attendance Calendar")
         subject_records = [x for x in load("subjects") if x.get("code") in me.get("subjects", [])]
@@ -1430,18 +1717,47 @@ def student_home():
 # SIDEBAR + ROUTER
 # ============================================================
 def sidebar():
-    u=st.session_state.user
-    st.sidebar.markdown(f"### 🎓 College ERP")
-    st.sidebar.caption(f"{u['name']} • {u['role'].title()}")
-    if st.sidebar.button("🚪 Logout", use_container_width=True): logout()
+    """Role-based navigation in Streamlit's native, collapsible sidebar."""
+    u = st.session_state.user
+    st.sidebar.markdown("""
+    <div style="padding:14px 12px;text-align:center">
+        <div style="font-size:2rem">🎓</div>
+        <div style="font-size:1.05rem;font-weight:800;margin-top:4px;color:#fff">College ERP</div>
+        <div style="font-size:.7rem;opacity:.85;margin-top:2px;color:#c7d2fe">v4.0 • SQLite</div>
+    </div>
+    """, unsafe_allow_html=True)
+    st.sidebar.markdown(f"""
+    <div style="padding:11px 13px;background:rgba(255,255,255,.08);border-radius:11px;margin:10px 0 14px;overflow-wrap:anywhere">
+        <div style="font-size:.68rem;opacity:.85;text-transform:uppercase;letter-spacing:.06em;font-weight:700;color:#c7d2fe">Logged in as</div>
+        <div style="font-weight:700;margin-top:3px;color:#fff">{u.get('name', 'User')}</div>
+        <div style="font-size:.74rem;opacity:.9;margin-top:2px;color:#c7d2fe">{str(u.get('role', '')).title()}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    role = str(u.get("role", "")).lower()
+    if role == "admin":
+        options = ["Dashboard", "Admission", "Students", "Teachers", "Courses",
+                   "Subjects", "Fee Structure", "Fees", "Papers", "Reports", "Backup", "Settings"]
+        nav_key = "nav_admin"
+    elif role == "teacher":
+        options = ["Teaching", "Settings"]
+        nav_key = "nav_teacher"
+    else:
+        options = ["My Dashboard", "Settings"]
+        nav_key = "nav_student"
+
+    # Keep a valid current selection when the user logs in under a different role.
+    if st.session_state.get(nav_key) not in options:
+        st.session_state[nav_key] = options[0]
+
+    menu = st.sidebar.radio(
+        "Navigation", options, key=nav_key, label_visibility="collapsed"
+    )
     st.sidebar.markdown("---")
-    if u["role"]=="admin":
-        return st.sidebar.radio("Menu",["Dashboard","Admission","Students","Teachers","Courses",
-            "Subjects","Fee Structure","Fees","Papers","Reports","Backup","Settings"],
-            label_visibility="collapsed")
-    if u["role"]=="teacher":
-        return st.sidebar.radio("Menu",["Teaching","Settings"], label_visibility="collapsed")
-    return st.sidebar.radio("Menu",["My Dashboard","Settings"], label_visibility="collapsed")
+    st.sidebar.caption(f"Database: {DB_PATH.name}")
+    if st.sidebar.button("🚪 Logout", use_container_width=True, key="sb_logout"):
+        logout()
+    return menu
 
 if not st.session_state.logged_in:
     login_page()
