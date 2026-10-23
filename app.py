@@ -4,16 +4,7 @@ import json, os, uuid, hashlib, shutil, zipfile, re, sqlite3, io
 from datetime import datetime, date
 import calendar
 from pathlib import Path
-st.markdown("""
-<style>
-#MainMenu {visibility: hidden;}
-footer {visibility: hidden;}
-.stDeployButton {display: none;}
-[data-testid="stToolbar"] {
-    display: none !important;
-}
-</style>
-""", unsafe_allow_html=True)
+
 
 st.set_page_config(page_title="College ERP — Professional", page_icon="🎓",
                    layout="wide", initial_sidebar_state="expanded")
