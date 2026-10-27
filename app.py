@@ -202,11 +202,13 @@ FILES = {k: DATA_DIR / f"{k}.json" for k in KEYS}
 
 # Local MariaDB requested by the project. For hosted deployments, set these as
 # environment variables or Streamlit secrets; localhost only means the app server itself.
-DB_HOST = os.getenv("DB_HOST", "localhost")
-DB_PORT = int(os.getenv("DB_PORT", "3306"))
-DB_USER = os.getenv("DB_USER", "root")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "12345")
-DB_NAME = os.getenv("DB_NAME", "myclgerp")
+import os
+
+DB_HOST = st.secrets.get("DB_HOST", "localhost")
+DB_PORT = int(st.secrets.get("DB_PORT", "3306"))
+DB_USER = st.secrets.get("DB_USER", "root")
+DB_PASSWORD = st.secrets.get("DB_PASSWORD", "")
+DB_NAME = st.secrets.get("DB_NAME", "myclgerp")
 try:
     if hasattr(st, "secrets") and "mariadb" in st.secrets:
         _dbsec = st.secrets["mariadb"]
