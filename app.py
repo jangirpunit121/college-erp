@@ -299,38 +299,40 @@ def _server_connection():
                            cursorclass=pymysql.cursors.DictCursor, connect_timeout=8)
 
 
-_DB_SCHEMA_READY = False
+@st.cache_resource(show_spinner=False)
+def _ensure_db_schema():
+    """Initialize schema once per server process, not once per user session."""
+    conn = _server_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"CREATE DATABASE IF NOT EXISTS `{DB_NAME}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
+            cur.execute(f"USE `{DB_NAME}`")
+            for key in KEYS:
+                table = f"erp_{key}"
+                cur.execute(f"""CREATE TABLE IF NOT EXISTS `{table}` (
+                    row_id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                    record_key VARCHAR(255) NULL,
+                    payload LONGTEXT NOT NULL,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_record_key (record_key)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci""")
+            cur.execute("""CREATE TABLE IF NOT EXISTS erp_activity (
+                id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                ts VARCHAR(32), username VARCHAR(255), user_role VARCHAR(100),
+                action_name VARCHAR(255), details TEXT
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci""")
+    finally:
+        conn.close()
+    return True
 
 
 def db_connect():
-    """Create the requested database and module tables once per Streamlit run."""
-    global _DB_SCHEMA_READY
-    if not _DB_SCHEMA_READY:
-        conn = _server_connection()
-        try:
-            with conn.cursor() as cur:
-                cur.execute(f"CREATE DATABASE IF NOT EXISTS `{DB_NAME}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
-                cur.execute(f"USE `{DB_NAME}`")
-                for key in KEYS:
-                    table = f"erp_{key}"
-                    cur.execute(f"""CREATE TABLE IF NOT EXISTS `{table}` (
-                        row_id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-                        record_key VARCHAR(255) NULL,
-                        payload LONGTEXT NOT NULL,
-                        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                        INDEX idx_record_key (record_key)
-                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci""")
-                cur.execute("""CREATE TABLE IF NOT EXISTS erp_activity (
-                    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-                    ts VARCHAR(32), username VARCHAR(255), user_role VARCHAR(100),
-                    action_name VARCHAR(255), details TEXT
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci""")
-            _DB_SCHEMA_READY = True
-        finally:
-            conn.close()
+    """Ensure schema once per process and return a new independent DB connection."""
+    _ensure_db_schema()
     return pymysql.connect(host=DB_HOST, port=DB_PORT, user=DB_USER, password=DB_PASSWORD,
                            database=DB_NAME, charset="utf8mb4", autocommit=True,
-                           cursorclass=pymysql.cursors.DictCursor, connect_timeout=8)
+                           cursorclass=pymysql.cursors.DictCursor, connect_timeout=8,
+                           read_timeout=20, write_timeout=20)
 
 
 def _json_default(key):
@@ -345,6 +347,7 @@ def _record_key(item, index):
     return str(index) if isinstance(item, (str, int, float)) else None
 
 
+@st.cache_data(ttl=60, show_spinner=False)
 def load(key):
     if key not in KEYS:
         return []
@@ -404,6 +407,11 @@ def save(key, data):
                     cur.executemany(f"INSERT INTO `erp_{key}` (record_key, payload, updated_at) VALUES (%s,%s,NOW())", items)
             # JSON mirror retained for manual backup and one-time migration compatibility.
             FILES[key].write_text(json.dumps(data, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+        # Refresh cached reads immediately after successful writes so changes appear at once.
+        try:
+            load.clear()
+        except Exception:
+            pass
         if _REDIS is not None and key in ("courses", "subjects"):
             try: _REDIS.delete(f"campuspro:v1:{key}")
             except Exception: pass
@@ -592,11 +600,22 @@ def xlsx_dl(df, name, key):
                        file_name=f"{name}_{today()}.xlsx", key=key,
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-def course_map(): return {c["id"]:c["name"] for c in load("courses") if isinstance(c,dict)}
-def student_map(): return {s["id"]:s["name"] for s in load("students") if isinstance(s,dict) and s.get("id")}
-def staff_map(): return {s["id"]:s["name"] for s in load("staff") if isinstance(s,dict) and s.get("id")}
-def non_teaching_map(): return {s["id"]:s["name"] for s in load("non_teaching") if isinstance(s,dict) and s.get("id")}
-def subject_map(): return {s["id"]:f"{s['code']} — {s['name']}" for s in load("subjects") if isinstance(s,dict)}
+def course_map():
+    """Build course options safely; tolerate older/incomplete records."""
+    result = {}
+    for course in load("courses"):
+        if not isinstance(course, dict):
+            continue
+        course_name = course.get("name") or course.get("course_name") or course.get("code")
+        course_id = course.get("id") or course.get("course_id") or course.get("code") or course_name
+        if course_id not in (None, "") and course_name not in (None, ""):
+            result[str(course_id)] = str(course_name)
+    return result
+
+def student_map(): return {str(s["id"]):s.get("name", str(s["id"])) for s in load("students") if isinstance(s,dict) and s.get("id")}
+def staff_map(): return {str(s["id"]):s.get("name", str(s["id"])) for s in load("staff") if isinstance(s,dict) and s.get("id")}
+def non_teaching_map(): return {str(s["id"]):s.get("name", str(s["id"])) for s in load("non_teaching") if isinstance(s,dict) and s.get("id")}
+def subject_map(): return {str(s["id"]):f"{s.get('code', '')} — {s.get('name', '')}" for s in load("subjects") if isinstance(s,dict) and s.get("id")}
 
 # ============================================================
 # DASHBOARD
@@ -744,52 +763,204 @@ def page_dashboard():
 # COURSES & SUBJECTS
 # ============================================================
 def page_courses():
-    if not is_admin(): st.error("🚫 Only Admin"); return
-    page_header("Courses", "Manage courses")
-    courses = load("courses")
+    """Admin course management with add, edit, and delete controls."""
+    if not is_admin():
+        st.error("🚫 Only Admin")
+        return
+
+    page_header("Courses", "Add, view, edit and manage courses")
+    courses = [dict(c) for c in load("courses") if isinstance(c, dict)]
+
     with st.expander("➕ Add Course", expanded=False):
-        with st.form("add_c"):
+        with st.form("add_c", clear_on_submit=True):
             c1, c2, c3 = st.columns(3)
-            cid = c1.text_input("Course ID", value=nid("C"))
-            name = c2.text_input("Name *")
-            code = c3.text_input("Code")
+            cid = c1.text_input("Course ID *", placeholder="Enter unique course ID")
+            name = c2.text_input("Name *", placeholder="e.g. BCA")
+            code = c3.text_input("Code", placeholder="Optional course code")
             c1, c2, c3 = st.columns(3)
-            dur = c1.number_input("Duration (yrs)", 1, 6, 4)
-            seats = c2.number_input("Seats", 1, 500, 60)
-            base_fee = c3.number_input("Base Fee (₹)", 0, 10_000_000, 50000)
+            dur = c1.number_input("Duration (yrs)", min_value=1, max_value=6, value=3)
+            seats = c2.number_input("Seats", min_value=1, max_value=500, value=60)
+            base_fee = c3.number_input("Base Fee (₹)", min_value=0, max_value=10_000_000, value=0, step=1000)
             submitted_course = st.form_submit_button("➕ Add Course", type="primary")
-            if submitted_course and not name.strip(): st.error("❌ Course name is required; nothing was saved.")
-            if submitted_course and name.strip():
-                courses.append({"id":cid,"name":name,"code":code,
-                                "duration":dur,"seats":seats,"base_fee":base_fee})
-                save("courses", courses); flash_message("success", "Added"); st.rerun()
-    if courses:
-        st.dataframe(pd.DataFrame([c for c in courses if isinstance(c,dict)]),
-                     use_container_width=True, hide_index=True)
+            if submitted_course:
+                cid_clean = cid.strip()
+                name_clean = name.strip()
+                if not cid_clean or not name_clean:
+                    st.error("Course ID aur Name required hain.")
+                elif any(str(c.get("id", c.get("course_id", ""))).strip().lower() == cid_clean.lower() for c in courses):
+                    st.error("Ye Course ID pehle se maujood hai. Unique ID enter karein.")
+                else:
+                    courses.append({"id": cid_clean, "name": name_clean, "code": code.strip(),
+                                    "duration": int(dur), "seats": int(seats), "base_fee": int(base_fee)})
+                    save("courses", courses)
+                    flash_message("success", "Course added successfully")
+                    st.rerun()
+
+    # Re-read after add/update so the list reflects the latest data.
+    courses = [dict(c) for c in load("courses") if isinstance(c, dict)]
+    if not courses:
+        st.info("Abhi koi course add nahi hai. Add Course se pehle course create karein.")
+        return
+
+    st.subheader("📚 Existing Courses")
+    display_rows = []
+    for c in courses:
+        display_rows.append({"Course ID": c.get("id") or c.get("course_id") or c.get("code") or "—",
+                             "Name": c.get("name") or c.get("course_name") or "—",
+                             "Code": c.get("code", ""), "Duration (yrs)": c.get("duration", ""),
+                             "Seats": c.get("seats", ""), "Base Fee (₹)": c.get("base_fee", "")})
+    st.dataframe(pd.DataFrame(display_rows), use_container_width=True, hide_index=True)
+
+    options = [str(c.get("id") or c.get("course_id") or c.get("code") or c.get("name")) for c in courses]
+    by_id = {}
+    for c, key in zip(courses, options):
+        # Ensure old records can be edited even when their original ID field was absent.
+        c.setdefault("id", key)
+        by_id[key] = c
+
+    st.markdown("#### ✏️ Edit / Delete Course")
+    selected_id = st.selectbox("Select course to edit", [""] + options,
+                               format_func=lambda x: "Choose a course…" if not x else f"{by_id[x].get('name', x)} ({x})",
+                               key="course_edit_select")
+    if selected_id:
+        selected = by_id[selected_id]
+        with st.form(f"edit_course_{selected_id}"):
+            c1, c2, c3 = st.columns(3)
+            edit_id = c1.text_input("Course ID *", value=str(selected.get("id", selected_id)))
+            edit_name = c2.text_input("Name *", value=str(selected.get("name", selected.get("course_name", ""))))
+            edit_code = c3.text_input("Code", value=str(selected.get("code", "")))
+            c1, c2, c3 = st.columns(3)
+            edit_dur = c1.number_input("Duration (yrs)", min_value=1, max_value=6, value=max(1, min(6, int(selected.get("duration", 3) or 3))))
+            edit_seats = c2.number_input("Seats", min_value=1, max_value=500, value=max(1, min(500, int(selected.get("seats", 60) or 60))))
+            edit_fee = c3.number_input("Base Fee (₹)", min_value=0, max_value=10_000_000, value=max(0, min(10_000_000, int(float(selected.get("base_fee", 0) or 0)))), step=1000)
+            b1, b2 = st.columns(2)
+            update_course = b1.form_submit_button("💾 Save Changes", type="primary", use_container_width=True)
+            delete_course = b2.form_submit_button("🗑 Delete Course", use_container_width=True)
+            if update_course:
+                new_id, new_name = edit_id.strip(), edit_name.strip()
+                duplicate = any(k != selected_id and str(c.get("id", c.get("course_id", ""))).strip().lower() == new_id.lower() for k, c in by_id.items())
+                if not new_id or not new_name:
+                    st.error("Course ID aur Name required hain.")
+                elif duplicate:
+                    st.error("Ye Course ID kisi doosre course ke liye use ho rahi hai.")
+                else:
+                    selected.update({"id": new_id, "name": new_name, "code": edit_code.strip(),
+                                     "duration": int(edit_dur), "seats": int(edit_seats), "base_fee": int(edit_fee)})
+                    save("courses", list(by_id.values()))
+                    flash_message("success", "Course updated successfully")
+                    st.rerun()
+            if delete_course:
+                # Prevent deleting a course that is referenced by existing subjects or student records.
+                related_subjects = [x for x in load("subjects") if isinstance(x, dict) and str(x.get("course_id", "")) == selected_id]
+                related_students = [x for x in load("students") if isinstance(x, dict) and str(x.get("course_id", "")) == selected_id]
+                if related_subjects or related_students:
+                    st.error("Is course ke subjects/students linked hain. Pehle un records ko update karein; course delete nahi hua.")
+                else:
+                    save("courses", [c for k, c in by_id.items() if k != selected_id])
+                    st.session_state.pop("course_edit_select", None)
+                    flash_message("success", "Course deleted successfully")
+                    st.rerun()
+
 
 def page_subjects():
-    if not is_admin(): st.error("🚫 Only Admin"); return
-    page_header("Subjects", "Manage subjects")
-    subs = load("subjects")
+    """Subject management: course selection starts blank and every subject is editable."""
+    if not is_admin():
+        st.error("🚫 Only Admin")
+        return
+
+    page_header("Subjects", "Add, view, edit and manage subjects by course and semester")
     cm = course_map()
-    with st.expander("➕ Add Subject"):
-        with st.form("add_s"):
+    subs = [dict(x) for x in load("subjects") if isinstance(x, dict)]
+    course_ids = list(cm.keys())
+
+    with st.expander("➕ Add Subject", expanded=False):
+        if not course_ids:
+            st.warning("Pehle Courses section mein valid course add karein.")
+        with st.form("add_s", clear_on_submit=True):
             c1, c2 = st.columns(2)
-            code = c1.text_input("Code *")
-            name = c2.text_input("Name *")
+            code = c1.text_input("Code *", placeholder="e.g. BCA101")
+            name = c2.text_input("Name *", placeholder="e.g. Computer Fundamentals")
             c1, c2 = st.columns(2)
-            course = c1.selectbox("Course", list(cm.keys()) or [""], format_func=lambda x: cm.get(x,x))
-            sem = c2.number_input("Semester", 1, 8, 1)
-            max_marks = st.number_input("Maximum Marks", 1, 1000, 100, step=5)
-            submitted_subject = st.form_submit_button("➕ Add Subject", type="primary")
-            if submitted_subject and (not name.strip() or not code.strip()): st.error("❌ Subject name and code are required; nothing was saved.")
-            if submitted_subject and name.strip() and code.strip():
-                subs.append({"id":nid("SUB"),"code":code,"name":name,"course_id":course,"semester":sem,"max_marks":int(max_marks)})
-                save("subjects", subs); flash_message("success", "Added"); st.rerun()
-    if subs:
-        df = pd.DataFrame([s for s in subs if isinstance(s,dict)])
-        if "course_id" in df.columns: df["course"] = df["course_id"].map(cm)
-        st.dataframe(df, use_container_width=True, hide_index=True)
+            course_choices = [""] + course_ids
+            course = c1.selectbox("Course *", course_choices,
+                                  format_func=lambda x: "Select course…" if not x else cm.get(str(x), str(x)),
+                                  key="subject_add_course")
+            sem = c2.number_input("Semester", min_value=1, max_value=8, value=1, step=1)
+            max_marks = st.number_input("Maximum Marks", min_value=1, max_value=1000, value=100, step=5)
+            submitted_subject = st.form_submit_button("➕ Add Subject", type="primary", disabled=not bool(course_ids))
+            if submitted_subject:
+                if not code.strip() or not name.strip():
+                    st.error("Subject name aur code required hain.")
+                elif not course:
+                    st.error("Subject add karne se pehle course select karein.")
+                elif any(str(x.get("code", "")).strip().lower() == code.strip().lower() and
+                         str(x.get("course_id", "")) == str(course) and int(x.get("semester", 1) or 1) == int(sem)
+                         for x in subs):
+                    st.error("Is course aur semester mein ye subject code pehle se hai.")
+                else:
+                    subs.append({"id": nid("SUB"), "code": code.strip(), "name": name.strip(),
+                                 "course_id": str(course), "semester": int(sem), "max_marks": int(max_marks)})
+                    save("subjects", subs)
+                    flash_message("success", "Subject added successfully")
+                    st.rerun()
+
+    subs = [dict(x) for x in load("subjects") if isinstance(x, dict)]
+    if not subs:
+        st.info("Abhi koi subject add nahi hai.")
+        return
+
+    st.subheader("📖 Existing Subjects")
+    rows = []
+    for sub in subs:
+        rows.append({"Subject ID": sub.get("id", "—"), "Code": sub.get("code", ""),
+                     "Name": sub.get("name", ""), "Course": cm.get(str(sub.get("course_id", "")), str(sub.get("course_id", "—"))),
+                     "Semester": sub.get("semester", 1), "Maximum Marks": sub.get("max_marks", 100)})
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+    subject_options = [str(s.get("id") or f"{s.get('course_id','')}-{s.get('code','')}-{i}") for i, s in enumerate(subs)]
+    sub_by_id = {}
+    for sub, key in zip(subs, subject_options):
+        sub.setdefault("id", key)
+        sub_by_id[key] = sub
+
+    st.markdown("#### ✏️ Edit / Delete Subject")
+    selected_sub_id = st.selectbox("Select subject to edit", [""] + subject_options,
+                                   format_func=lambda x: "Choose a subject…" if not x else
+                                   f"{sub_by_id[x].get('name', x)} — {sub_by_id[x].get('code', '')}",
+                                   key="subject_edit_select")
+    if selected_sub_id:
+        selected_sub = sub_by_id[selected_sub_id]
+        with st.form(f"edit_subject_{selected_sub_id}"):
+            c1, c2 = st.columns(2)
+            edit_code = c1.text_input("Code *", value=str(selected_sub.get("code", "")))
+            edit_name = c2.text_input("Name *", value=str(selected_sub.get("name", "")))
+            c1, c2 = st.columns(2)
+            existing_course = str(selected_sub.get("course_id", ""))
+            edit_course = c1.selectbox("Course *", [""] + course_ids,
+                                       index=(course_ids.index(existing_course) + 1 if existing_course in course_ids else 0),
+                                       format_func=lambda x: "Select course…" if not x else cm.get(str(x), str(x)))
+            edit_sem = c2.number_input("Semester", min_value=1, max_value=8,
+                                       value=max(1, min(8, int(selected_sub.get("semester", 1) or 1))), step=1)
+            edit_max_marks = st.number_input("Maximum Marks", min_value=1, max_value=1000,
+                                             value=max(1, min(1000, int(selected_sub.get("max_marks", 100) or 100))), step=5)
+            b1, b2 = st.columns(2)
+            update_subject = b1.form_submit_button("💾 Save Changes", type="primary", use_container_width=True)
+            delete_subject = b2.form_submit_button("🗑 Delete Subject", use_container_width=True)
+            if update_subject:
+                if not edit_code.strip() or not edit_name.strip() or not edit_course:
+                    st.error("Subject code, name aur course required hain.")
+                else:
+                    selected_sub.update({"code": edit_code.strip(), "name": edit_name.strip(),
+                                         "course_id": str(edit_course), "semester": int(edit_sem),
+                                         "max_marks": int(edit_max_marks)})
+                    save("subjects", list(sub_by_id.values()))
+                    flash_message("success", "Subject updated successfully")
+                    st.rerun()
+            if delete_subject:
+                save("subjects", [x for k, x in sub_by_id.items() if k != selected_sub_id])
+                st.session_state.pop("subject_edit_select", None)
+                flash_message("success", "Subject deleted successfully")
+                st.rerun()
 
 # ============================================================
 # ADMISSION (Complete Form)
@@ -2946,7 +3117,7 @@ def main():
         </div>
         """, unsafe_allow_html=True)
         labels = [m[0] for m in menu]
-        choice = st.radio("Nav", labels, label_visibility="collapsed")
+        choice = st.radio("Nav", labels, label_visibility="collapsed", key="main_navigation")
         st.divider()
         st.caption(f"📋 Modules: **{len(menu)}**")
         if st.button("🚪 Logout", use_container_width=True): logout()
