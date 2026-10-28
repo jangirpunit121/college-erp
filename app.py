@@ -4,7 +4,7 @@ Run: streamlit run app.py
 """
 import streamlit as st
 import pandas as pd
-import json, os, uuid, hashlib, zipfile, re, io, base64
+import json, os, uuid, hashlib, zipfile, re, io, base64, html
 import pymysql
 import os
 try:
@@ -61,7 +61,71 @@ st.markdown("""
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
     
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
-    #MainMenu, footer, header {visibility:hidden;}
+    #MainMenu, footer {visibility:hidden;}
+    /* Hide the extra Streamlit header toolbar buttons; retain the mobile sidebar menu. */
+    header[data-testid="stHeader"] {background:transparent !important; box-shadow:none !important;}
+    header[data-testid="stHeader"] [data-testid="stToolbar"],
+    header[data-testid="stHeader"] [data-testid="stDecoration"],
+    header[data-testid="stHeader"] [data-testid="stStatusWidget"] {display:none !important;}
+    /* Keep the sidebar in a fixed left column without covering the main content. */
+    [data-testid="stSidebar"] {
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        height: 100vh !important;
+        min-width: 260px !important;
+        width: 260px !important;
+        transform: none;
+        z-index: 1000;
+        overflow-y: auto !important;
+    }
+    [data-testid="stSidebar"] > div:first-child {height:100vh; overflow-y:auto;}
+    [data-testid="stAppViewContainer"] {overflow-x:hidden;}
+    [data-testid="stMain"] {
+        margin-left:260px !important;
+        width:calc(100% - 260px) !important;
+        min-width:0 !important;
+    }
+    [data-testid="stMainBlockContainer"] {
+        width:100% !important;
+        max-width:1400px !important;
+        box-sizing:border-box !important;
+    }
+    [data-testid="stAppViewContainer"] .main {margin-left:0 !important; width:100% !important; min-width:0 !important;}
+    [data-testid="stSidebarCollapsedControl"] {display:none !important;}
+    /* Visible, animated processing indicator */
+    .process-spinner {
+        display:inline-block; width:18px; height:18px;
+        border:3px solid #c7d2fe; border-top-color:#4f46e5;
+        border-radius:50%; animation:campuspro-spin .75s linear infinite;
+        vertical-align:middle; margin-right:8px;
+    }
+    /* Give all buttons immediate click feedback while Streamlit handles the action. */
+    [data-testid="stButton"] button:active,
+    [data-testid="stFormSubmitButton"] button:active,
+    [data-testid="stDownloadButton"] button:active {
+        cursor: progress !important; filter: brightness(.92); transform:scale(.99);
+    }
+    [data-testid="stButton"] button:active::after,
+    [data-testid="stFormSubmitButton"] button:active::after {
+        content:""; display:inline-block; width:12px; height:12px; margin-left:8px;
+        border:2px solid currentColor; border-right-color:transparent;
+        border-radius:50%; animation:campuspro-spin .65s linear infinite; vertical-align:middle;
+    }
+    @keyframes campuspro-spin {to {transform:rotate(360deg);}}
+    @media (max-width: 768px) {
+        [data-testid="stSidebar"] {
+            position:fixed !important; width:min(86vw,320px) !important;
+            min-width:min(86vw,320px) !important; z-index:100000;
+        }
+        [data-testid="stMain"] {margin-left:0 !important; width:100% !important;}
+        [data-testid="stAppViewContainer"] .main {margin-left:0 !important; width:100% !important;}
+        [data-testid="stSidebarCollapsedControl"] {display:flex !important;}
+        header[data-testid="stHeader"] [data-testid="stToolbar"] {display:none !important;}
+        .block-container {padding-top:3.5rem !important;}
+        .page-banner {padding:18px; gap:12px; flex-direction:column; align-items:flex-start;}
+        .page-banner .right {text-align:left;}
+    }
     .block-container {padding-top: 1rem; padding-bottom: 2rem; max-width: 1400px;}
     
     /* Metrics */
@@ -200,23 +264,31 @@ KEYS = ["users", "students", "staff", "non_teaching", "courses", "subjects",
         "announcements", "settings", "exams", "bills", "salaries"]
 FILES = {k: DATA_DIR / f"{k}.json" for k in KEYS}
 
-# Local MariaDB requested by the project. For hosted deployments, set these as
-# environment variables or Streamlit secrets; localhost only means the app server itself.
+# MariaDB configuration. Defaults match the user's local database setup.
+# Streamlit Cloud can override these with secrets/environment variables.
 import os
 
-DB_HOST = st.secrets.get("DB_HOST", "localhost")
-DB_PORT = int(st.secrets.get("DB_PORT", "3306"))
-DB_USER = st.secrets.get("DB_USER", "root")
-DB_PASSWORD = st.secrets.get("DB_PASSWORD", "")
-DB_NAME = st.secrets.get("DB_NAME", "myclgerp")
+def _read_secret(key, default):
+    """Read Streamlit secrets if configured; work normally when secrets.toml is absent."""
+    try:
+        value = st.secrets.get(key, default)
+        return default if value is None else value
+    except Exception:
+        return default
+
+DB_HOST = os.getenv("DB_HOST", _read_secret("DB_HOST", "localhost"))
+DB_PORT = int(os.getenv("DB_PORT", str(_read_secret("DB_PORT", "3306"))))
+DB_USER = os.getenv("DB_USER", _read_secret("DB_USER", "root"))
+DB_PASSWORD = os.getenv("DB_PASSWORD", _read_secret("DB_PASSWORD", "12345"))
+DB_NAME = os.getenv("DB_NAME", _read_secret("DB_NAME", "myclgerp"))
 try:
-    if hasattr(st, "secrets") and "mariadb" in st.secrets:
-        _dbsec = st.secrets["mariadb"]
-        DB_HOST = _dbsec.get("host", DB_HOST)
-        DB_PORT = int(_dbsec.get("port", DB_PORT))
-        DB_USER = _dbsec.get("user", DB_USER)
-        DB_PASSWORD = _dbsec.get("password", DB_PASSWORD)
-        DB_NAME = _dbsec.get("database", DB_NAME)
+    _dbsec = st.secrets.get("mariadb", {})
+    if _dbsec:
+        DB_HOST = os.getenv("DB_HOST", _dbsec.get("host", DB_HOST))
+        DB_PORT = int(os.getenv("DB_PORT", _dbsec.get("port", DB_PORT)))
+        DB_USER = os.getenv("DB_USER", _dbsec.get("user", DB_USER))
+        DB_PASSWORD = os.getenv("DB_PASSWORD", _dbsec.get("password", DB_PASSWORD))
+        DB_NAME = os.getenv("DB_NAME", _dbsec.get("database", DB_NAME))
 except Exception:
     pass
 
@@ -317,20 +389,21 @@ def save(key, data):
         raise ValueError(f"Unknown ERP data module: {key}")
     conn = None
     try:
-        conn = db_connect()
-        with conn.cursor() as cur:
-            cur.execute(f"USE `{DB_NAME}`")
-            cur.execute(f"DELETE FROM `erp_{key}`")
-            if isinstance(data, dict):
-                items = [(str(k)[:255], json.dumps(v, ensure_ascii=False, default=str)) for k, v in data.items()]
-            elif isinstance(data, list):
-                items = [(_record_key(item, i), json.dumps(item, ensure_ascii=False, default=str)) for i, item in enumerate(data)]
-            else:
-                items = [(None, json.dumps(data, ensure_ascii=False, default=str))]
-            if items:
-                cur.executemany(f"INSERT INTO `erp_{key}` (record_key, payload, updated_at) VALUES (%s,%s,NOW())", items)
-        # JSON mirror retained for manual backup and one-time migration compatibility.
-        FILES[key].write_text(json.dumps(data, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+        with st.spinner(f"Saving {key.replace('_', ' ')}..."):
+            conn = db_connect()
+            with conn.cursor() as cur:
+                cur.execute(f"USE `{DB_NAME}`")
+                cur.execute(f"DELETE FROM `erp_{key}`")
+                if isinstance(data, dict):
+                    items = [(str(k)[:255], json.dumps(v, ensure_ascii=False, default=str)) for k, v in data.items()]
+                elif isinstance(data, list):
+                    items = [(_record_key(item, i), json.dumps(item, ensure_ascii=False, default=str)) for i, item in enumerate(data)]
+                else:
+                    items = [(None, json.dumps(data, ensure_ascii=False, default=str))]
+                if items:
+                    cur.executemany(f"INSERT INTO `erp_{key}` (record_key, payload, updated_at) VALUES (%s,%s,NOW())", items)
+            # JSON mirror retained for manual backup and one-time migration compatibility.
+            FILES[key].write_text(json.dumps(data, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
         if _REDIS is not None and key in ("courses", "subjects"):
             try: _REDIS.delete(f"campuspro:v1:{key}")
             except Exception: pass
@@ -344,6 +417,32 @@ def save(key, data):
 
 def hpw(p): return hashlib.sha256(p.encode()).hexdigest()
 def nid(p="ID"): return f"{p}{uuid.uuid4().hex[:6].upper()}"
+def _next_number(records, field, prefix, width=4):
+    year = str(date.today().year)
+    stem = f"{prefix}{year}"
+    highest = 0
+    for row in records:
+        if not isinstance(row, dict):
+            continue
+        value = str(row.get(field, "") or "")
+        match = re.fullmatch(re.escape(stem) + r"(\d+)", value)
+        if match:
+            highest = max(highest, int(match.group(1)))
+    return f"{stem}{highest + 1:0{width}d}"
+
+def next_student_roll(students):
+    return _next_number(students, "roll_no", "ROLL", 4)
+
+def next_student_enrollment(students):
+    return _next_number(students, "enrollment_no", "ENR", 4)
+
+def next_employee_id():
+    employees = [x for x in load("staff") if isinstance(x, dict)] + [x for x in load("non_teaching") if isinstance(x, dict)]
+    return _next_number(employees, "id", "EMP", 4)
+
+def flash_message(kind, message):
+    st.session_state["_flash_message"] = {"kind": kind, "message": str(message)}
+
 def now(): return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 def today(): return date.today().isoformat()
 
@@ -434,17 +533,30 @@ def login_page():
     s = load("settings")
     st.markdown("""
     <style>
-    .login-box {max-width: 420px; margin: 60px auto; padding: 40px;
-        background: white; border-radius: 16px;
-        box-shadow: 0 8px 32px rgba(0,0,0,0.08);}
+    /* Login is the only page that uses the full viewport: true horizontal + vertical center. */
+    [data-testid="stMain"] {margin-left:0 !important; width:100% !important;}
+    [data-testid="stMainBlockContainer"] {
+        width:100% !important; max-width:100% !important; min-height:100vh !important;
+        box-sizing:border-box !important; display:flex !important; flex-direction:column !important;
+        justify-content:center !important; align-items:center !important;
+        padding:24px !important; margin:0 auto !important;
+    }
+    [data-testid="stSidebar"] {display:none !important;}
+    .login-heading {text-align:center; padding:16px 0 18px 0;}
+    div[data-testid="stForm"] {background:#fff; border:1px solid #e8edf5; border-radius:16px;
+        padding:26px; box-shadow:0 12px 36px rgba(15,23,42,.10);}
+    @media(max-width:768px) {
+        [data-testid="stMainBlockContainer"] {padding:18px !important;}
+        div[data-testid="stForm"] {padding:18px;}
+    }
     </style>""", unsafe_allow_html=True)
-    c1, c2, c3 = st.columns([1,2,1])
+    c1, c2, c3 = st.columns([1, 1.15, 1], gap="small")
     with c2:
         st.markdown(f"""
-        <div style="text-align:center; padding:40px 0 20px 0;">
+        <div class="login-heading">
             <div style="font-size:56px;">🎓</div>
-            <h1 style="color:#0f172a; margin:12px 0 4px 0; font-size:28px;">{s.get('college_name','College ERP')}</h1>
-            <p style="color:#64748b; margin:0;">{s.get('academic_year','')}</p>
+            <h1 style="color:#0f172a; margin:12px 0 4px 0; font-size:28px;">{html.escape(str(s.get('college_name','College ERP')))}</h1>
+            <p style="color:#64748b; margin:0;">{html.escape(str(s.get('academic_year','')))}</p>
         </div>""", unsafe_allow_html=True)
         with st.form("login"):
             u = st.text_input("Username", placeholder="Enter username")
@@ -455,7 +567,7 @@ def login_page():
                     st.session_state["user"] = user
                     log(u, user.get("role"), "LOGIN")
                     st.rerun()
-                else: st.error("Invalid credentials")
+                else: st.error("❌ Invalid username or password. Please try again.")
 
 def page_header(title, sub=""):
     s = load("settings"); u = current_user() or {}
@@ -490,26 +602,143 @@ def subject_map(): return {s["id"]:f"{s['code']} — {s['name']}" for s in load(
 # DASHBOARD
 # ============================================================
 def page_dashboard():
-    u = current_user()
-    page_header(f"Welcome, {u['name']}!", "Dashboard Overview")
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("👨‍🎓 Students", len(load("students")))
-    c2.metric("👨‍🏫 Faculty", len(load("staff")))
-    c3.metric("📚 Subjects", len(load("subjects")))
-    fees = load("fees")
-    total = sum(f.get("amount",0) for f in fees if isinstance(f,dict))
-    c4.metric("💰 Fees Collected", f"₹{total:,}")
+    """Role-scoped dashboard: show each login only the metrics it is allowed to see."""
+    u = current_user() or {}
+    role = str(u.get("role", "")).strip()
+    role_key = role.lower().replace("_", " ")
+    page_header(f"Welcome, {u.get('name', 'User')}!", "Your Dashboard")
+
+    # Load data once, then strictly scope metrics by role.
+    students_all = [x for x in load("students") if isinstance(x, dict)]
+    staff_all = [x for x in load("staff") if isinstance(x, dict)]
+    subjects_all = [x for x in load("subjects") if isinstance(x, dict)]
+    attendance_all = [x for x in load("attendance") if isinstance(x, dict)]
+    marks_all = [x for x in load("marks") if isinstance(x, dict)]
+    fees_all = [x for x in load("fees") if isinstance(x, dict)]
+    today_str = str(date.today())
+
+    metrics = []
+    if is_admin_role(role) or (u.get("username") or "").lower() == "admin":
+        # Only administrators receive university-wide totals.
+        metrics = [
+            ("👨‍🎓 Total Students", len(students_all)),
+            ("👨‍🏫 Faculty", len(staff_all)),
+            ("📚 Subjects", len(subjects_all)),
+            ("💰 Fees Collected", f"₹{sum(float(f.get('amount', 0) or 0) for f in fees_all):,.0f}"),
+        ]
+    elif role_key == "student":
+        sid = u.get("student_id")
+        my_student = next((x for x in students_all if sid and str(x.get("id")) == str(sid)), None)
+        if my_student:
+            sid = my_student.get("id")
+            my_att = [a for a in attendance_all if str(a.get("student_id")) == str(sid)]
+            my_marks = [m for m in marks_all if str(m.get("student_id")) == str(sid)]
+            my_fees = [f for f in fees_all if str(f.get("student_id")) == str(sid)]
+            paid = sum(float(f.get("amount", 0) or 0) for f in my_fees)
+            payable = float(my_student.get("final_fee", 0) or 0)
+            present = sum(1 for a in my_att if str(a.get("status", "")).lower() == "present")
+            absent = sum(1 for a in my_att if str(a.get("status", "")).lower() == "absent")
+            metrics = [
+                ("📋 My Attendance", f"{present} Present / {absent} Absent"),
+                ("📝 My Marks Records", len(my_marks)),
+                ("💰 My Fees Paid", f"₹{paid:,.0f}"),
+                ("⏳ My Fee Due", f"₹{max(0, payable-paid):,.0f}"),
+            ]
+        else:
+            metrics = [("👤 My Profile", "Not linked"), ("📋 My Attendance", 0), ("📝 My Marks", 0), ("💰 My Fees", "No linked record")]
+            st.warning("Your login is not linked to a student record. Please contact the administration; university-wide totals are hidden.")
+    elif role_key == "teacher":
+        teacher = next((x for x in staff_all if
+                        (u.get("staff_id") and str(x.get("id")) == str(u.get("staff_id"))) or
+                        (u.get("username") and str(x.get("username", "")).lower() == str(u.get("username", "")).lower())), None)
+        assigned_ids = set((teacher or {}).get("subject_ids", u.get("subject_ids", [])) or [])
+        my_subjects = [x for x in subjects_all if x.get("id") in assigned_ids or str(x.get("id")) in {str(i) for i in assigned_ids}]
+        class_keys = {(x.get("course_id"), str(x.get("semester", 1))) for x in my_subjects}
+        my_students = [x for x in students_all if (x.get("course_id"), str(x.get("semester", 1))) in class_keys] if class_keys else []
+        my_student_ids = {str(x.get("id")) for x in my_students}
+        my_att = [a for a in attendance_all if str(a.get("student_id")) in my_student_ids and
+                  (not assigned_ids or str(a.get("subject_id")) in {str(i) for i in assigned_ids}) and a.get("date") == today_str]
+        present = sum(1 for a in my_att if str(a.get("status", "")).lower() == "present")
+        absent = sum(1 for a in my_att if str(a.get("status", "")).lower() == "absent")
+        my_marks = [m for m in marks_all if str(m.get("student_id")) in my_student_ids and
+                    (not assigned_ids or str(m.get("subject_id")) in {str(i) for i in assigned_ids})]
+        metrics = [
+            ("🎓 My Assigned Students", len(my_students)),
+            ("✅ Present Today", present),
+            ("❌ Absent Today", absent),
+            ("📝 My Subject Marks Records", len(my_marks)),
+        ]
+        if not assigned_ids:
+            st.info("Aapke login par subjects/classes assign nahi hain. Admin se Faculty section mein subjects assign karwayein. Isliye students aur attendance counts 0 dikh rahe hain; university-wide data nahi dikhaya jayega.")
+    elif role_key == "accountant":
+        my_total = sum(float(f.get("amount", 0) or 0) for f in fees_all)
+        metrics = [("💰 Fees Collected", f"₹{my_total:,.0f}"), ("🧾 Fee Transactions", len(fees_all)),
+                   ("⏳ Students With Due", sum(1 for st in students_all if sum(float(f.get("amount",0) or 0) for f in fees_all if str(f.get("student_id")) == str(st.get("id"))) < float(st.get("final_fee",0) or 0))),
+                   ("📄 Bills", len([b for b in load("bills") if isinstance(b, dict)]))]
+    elif role_key == "admission cell":
+        metrics = [("🎓 Admissions / Students", len(students_all)), ("🧑‍🏫 Faculty Records", len(staff_all)),
+                   ("📚 Courses", len(load("courses"))), ("📖 Subjects", len(subjects_all))]
+    elif role_key == "librarian":
+        books = [b for b in load("library_books") if isinstance(b, dict)]
+        issues = [i for i in load("library_issues") if isinstance(i, dict)]
+        metrics = [("📚 Book Titles", len(books)), ("📖 Active Issues", sum(1 for i in issues if i.get("status") == "Issued")),
+                   ("↩ Returned Books", sum(1 for i in issues if i.get("status") == "Returned")), ("📦 Copies Available", sum(int(b.get("available",0) or 0) for b in books))]
+    elif role_key == "exam cell":
+        exams = [e for e in load("exams") if isinstance(e, dict)]
+        metrics = [("📅 Scheduled Exams", len(exams)), ("📚 Subjects", len(subjects_all)),
+                   ("📝 Marks Records", len(marks_all)), ("📄 Papers", len([p for p in load("papers") if isinstance(p, dict)]))]
+    elif role_key == "hostel manager":
+        hostel_students = [x for x in students_all if str(x.get("hostel", "")).lower() in ("yes", "true", "1")]
+        metrics = [("🏠 Hostel Students", len(hostel_students)), ("🛏 Rooms Allocated", sum(1 for x in hostel_students if x.get("hostel_room"))),
+                   ("🚌 Transport Students", sum(1 for x in students_all if str(x.get("transport", "")).lower() in ("yes", "true", "1"))),
+                   ("📋 My Hostel Records", len(hostel_students))]
+    else:
+        # Other logins get personal leave/salary records only where a record owner matches.
+        username = str(u.get("username", "")).lower()
+        my_leaves = [x for x in load("leaves") if isinstance(x, dict) and str(x.get("username", x.get("user", ""))).lower() == username]
+        my_salary = [x for x in load("salaries") if isinstance(x, dict) and str(x.get("username", x.get("user", ""))).lower() == username]
+        metrics = [("🏖 My Leave Requests", len(my_leaves)), ("💼 My Salary Records", len(my_salary))]
+
+    cols = st.columns(min(4, max(1, len(metrics))))
+    for i, (label, value) in enumerate(metrics):
+        cols[i % len(cols)].metric(label, value)
 
     st.divider()
-    st.subheader("📢 Latest Announcements")
-    anns = load("announcements")[-5:][::-1]
+    st.subheader("✨ Rotating Campus Slider · Top 10 Notices")
+    anns = [a for a in load("announcements") if isinstance(a, dict)][::-1][:10]
+    slides = anns[:10] or [
+        {"title": "Welcome to CampusPro ERP", "body": "Manage students, faculty, fees and academic activities in one place."},
+        {"title": "Automatic Student Numbers", "body": "Roll numbers and enrollment numbers are generated during admission."},
+        {"title": "Campus at a Glance", "body": "Use the left menu to access the modules available to your login."},
+    ]
+    count = len(slides)
+    duration = count * 4
+    keyframes = []
+    slide_html = []
+    for idx, item in enumerate(slides):
+        start, end = idx * 100 / count, (idx + 1) * 100 / count
+        keyframes.append(f"{start:.3f}% {{opacity:0;transform:translateX(18px)}} {start+1:.3f}% {{opacity:1;transform:translateX(0)}} {max(start+1,end-1):.3f}% {{opacity:1;transform:translateX(0)}} {end:.3f}% {{opacity:0;transform:translateX(-18px)}}")
+        title = html.escape(str(item.get("title", "Campus Update")))
+        body = html.escape(str(item.get("body", "")))[:420]
+        by = html.escape(str(item.get("by", "CampusPro ERP")))
+        slide_html.append(f'<div class="campus-slide" style="animation-delay:{idx*4}s"><div class="slide-kicker">CAMPUS UPDATE · {idx+1:02d}</div><h2>{title}</h2><p>{body}</p><small>{by}</small></div>')
+    css = f'''<style>
+    .campus-slider{{position:relative;height:190px;overflow:hidden;border-radius:16px;background:linear-gradient(120deg,#3730a3,#7c3aed,#2563eb);color:white;margin:10px 0 24px}}
+    .campus-slide{{position:absolute;inset:0;padding:26px 30px;opacity:0;box-sizing:border-box;animation:campus-slide-rotate {duration}s linear infinite}}
+    .campus-slide h2{{color:white!important;font-size:23px;margin:8px 0}}
+    .campus-slide p{{color:#f5f3ff;max-width:900px;margin:0 0 10px}}
+    .campus-slide small,.slide-kicker{{color:#ddd6fe}} .slide-kicker{{font-size:10px;letter-spacing:2px;font-weight:700}}
+    @keyframes campus-slide-rotate{{{' '.join(keyframes)}}}
+    @media(max-width:768px){{.campus-slider{{height:230px}}.campus-slide{{padding:20px}}.campus-slide h2{{font-size:20px}}}}
+    </style>'''
+    st.markdown(css + '<div class="campus-slider">' + ''.join(slide_html) + '</div>', unsafe_allow_html=True)
+    st.subheader("📢 Latest 10 Announcements / Notices")
     if not anns: st.info("No announcements")
     for a in anns:
-        if isinstance(a, dict):
-            with st.container(border=True):
-                st.markdown(f"**{a.get('title','')}**")
-                st.write(str(a.get('body',''))[:300])
-                st.caption(f"{a.get('by','')} · {a.get('ts','')}")
+        with st.container(border=True):
+            st.markdown(f"**{a.get('title','')}**")
+            st.write(str(a.get('body',''))[:300])
+            st.caption(f"{a.get('by','')} · {a.get('ts','')}")
 
 # ============================================================
 # COURSES & SUBJECTS
@@ -528,10 +757,12 @@ def page_courses():
             dur = c1.number_input("Duration (yrs)", 1, 6, 4)
             seats = c2.number_input("Seats", 1, 500, 60)
             base_fee = c3.number_input("Base Fee (₹)", 0, 10_000_000, 50000)
-            if st.form_submit_button("➕ Add Course", type="primary") and name:
+            submitted_course = st.form_submit_button("➕ Add Course", type="primary")
+            if submitted_course and not name.strip(): st.error("❌ Course name is required; nothing was saved.")
+            if submitted_course and name.strip():
                 courses.append({"id":cid,"name":name,"code":code,
                                 "duration":dur,"seats":seats,"base_fee":base_fee})
-                save("courses", courses); st.success("Added"); st.rerun()
+                save("courses", courses); flash_message("success", "Added"); st.rerun()
     if courses:
         st.dataframe(pd.DataFrame([c for c in courses if isinstance(c,dict)]),
                      use_container_width=True, hide_index=True)
@@ -550,9 +781,11 @@ def page_subjects():
             course = c1.selectbox("Course", list(cm.keys()) or [""], format_func=lambda x: cm.get(x,x))
             sem = c2.number_input("Semester", 1, 8, 1)
             max_marks = st.number_input("Maximum Marks", 1, 1000, 100, step=5)
-            if st.form_submit_button("➕ Add Subject", type="primary") and name and code:
+            submitted_subject = st.form_submit_button("➕ Add Subject", type="primary")
+            if submitted_subject and (not name.strip() or not code.strip()): st.error("❌ Subject name and code are required; nothing was saved.")
+            if submitted_subject and name.strip() and code.strip():
                 subs.append({"id":nid("SUB"),"code":code,"name":name,"course_id":course,"semester":sem,"max_marks":int(max_marks)})
-                save("subjects", subs); st.success("Added"); st.rerun()
+                save("subjects", subs); flash_message("success", "Added"); st.rerun()
     if subs:
         df = pd.DataFrame([s for s in subs if isinstance(s,dict)])
         if "course_id" in df.columns: df["course"] = df["course_id"].map(cm)
@@ -575,13 +808,16 @@ def page_admission():
     with st.form("admission_full", clear_on_submit=False):
         st.markdown("#### 🎓 Course & Admission Details")
         c1, c2, c3 = st.columns(3)
-        sid = c1.text_input("Student ID", value=nid("S"))
+        sid = c1.text_input("Student ID (Automatic)", value=nid("S"), disabled=True)
         course = c2.selectbox("Course *", list(courses.keys()), format_func=lambda x: courses.get(x, x))
         sem = c3.selectbox("Current Semester *", list(range(1, 9)), index=0)
         c1, c2, c3 = st.columns(3)
-        roll = c1.text_input("Roll / Admission No.")
-        year = c2.number_input("Admission Year", 2000, 2035, date.today().year)
-        batch = c3.text_input("Batch / Academic Year", value=str(date.today().year))
+        roll = next_student_roll(students)
+        enrollment_no = next_student_enrollment(students)
+        c1.text_input("Roll Number (Automatic)", value=roll, disabled=True)
+        c2.text_input("Enrollment Number (Automatic)", value=enrollment_no, disabled=True)
+        year = c3.number_input("Admission Year", 2000, 2035, date.today().year)
+        batch = st.text_input("Batch / Academic Year", value=str(date.today().year))
 
         st.markdown("#### 👤 Personal Details")
         c1, c2, c3 = st.columns(3)
@@ -837,7 +1073,7 @@ def page_admission():
         gap_path = save_file(gap_doc)
         other_path = save_file(other_doc)
         student = {
-            "id": sid, "roll_no": roll, "name": name.strip(), "email": email.strip(), "phone": phone.strip(),
+            "id": sid, "roll_no": roll, "enrollment_no": enrollment_no, "name": name.strip(), "email": email.strip(), "phone": phone.strip(),
             "alt_phone": alt_phone, "dob": str(dob), "gender": gender, "marital_status": marital,
             "blood_group": blood, "category": category, "caste": category, "subcaste": subcaste,
             "religion": religion, "nationality": nationality, "aadhaar": aadhaar,
@@ -894,7 +1130,7 @@ def page_admission():
                       "name": name.strip(), "student_id": sid, "active": True, "email": email.strip()})
         save("users", users)
         log(current_user().get("username"), "Admission Cell", "ADMISSION", f"{sid}:{name}")
-        st.success(f"✅ {name} admitted successfully. Student ID: {sid}; login: {username}")
+        flash_message("success", f"✅ {name} admitted successfully. Student ID: {sid}; login: {username}")
         st.rerun()
 
 # ============================================================
@@ -1132,7 +1368,7 @@ def page_students():
                 save("users", users)
                 save("students", students)
                 log(current_user().get("username"), "Admission Cell", "STUDENT_FULL_UPDATE", selected_edit)
-                st.success("Student ke saare saved fields update ho gaye.")
+                flash_message("success", "Student ke saare saved fields update ho gaye.")
                 st.rerun()
 
 # ============================================================
@@ -1183,7 +1419,7 @@ def page_faculty():
         with st.expander("➕ Add New Faculty"):
             with st.form("add_staff"):
                 c1, c2 = st.columns(2)
-                tid = c1.text_input("Staff ID", value=nid("T"))
+                tid = c1.text_input("Employee ID (Automatic)", value=next_employee_id(), disabled=True)
                 name = c2.text_input("Name *")
                 dept = c1.selectbox("Dept", ["CSE","ECE","ME","Civil","Science"])
                 desig = c2.selectbox("Designation", ["Professor","Associate Professor","Assistant Professor","Lecturer"])
@@ -1203,7 +1439,10 @@ def page_faculty():
                 assigned_subject_ids = st.multiselect("Assigned Subjects / Classes", list(subject_options.keys()), format_func=lambda x: subject_options[x])
                 uname = c1.text_input("Login Username")
                 upwd = c2.text_input("Login Password", type="password")
-                if st.form_submit_button("➕ Add Faculty", type="primary") and name:
+                submitted_faculty = st.form_submit_button("➕ Add Faculty", type="primary")
+                if submitted_faculty and not name.strip():
+                    st.error("❌ Faculty name is required. Nothing was saved.")
+                if submitted_faculty and name.strip():
                     staff.append({"id":tid,"name":name,"dept":dept,"designation":desig,
                                   "email":email,"phone":phone,"qualification":qual,
                                   "username":uname,"subject_ids":assigned_subject_ids,
@@ -1216,7 +1455,7 @@ def page_faculty():
                         users.append({"username":uname,"password":hpw(upwd),"role":"Teacher",
                                       "name":name,"active":True,"staff_id":tid,"subject_ids":assigned_subject_ids})
                         save("users", users)
-                    st.success("Added"); st.rerun()
+                    flash_message("success", "Added"); st.rerun()
         if filtered_staff:
             # Show readable assigned course/semester subjects in the faculty list.
             display_rows = []
@@ -1310,7 +1549,7 @@ def page_faculty():
                     save("users", users)
                     save("staff", staff)
                     log(current_user().get("username"), "Admission Cell", "FACULTY_FULL_UPDATE", tid)
-                    st.success("Faculty ke saare saved fields update ho gaye.")
+                    flash_message("success", "Faculty ke saare saved fields update ho gaye.")
                     st.rerun()
 
 # ============================================================
@@ -1327,7 +1566,7 @@ def page_non_teaching():
         with st.expander("➕ Add Non-Teaching Staff"):
             with st.form("add_nt"):
                 c1, c2 = st.columns(2)
-                nid_val = c1.text_input("Staff ID", value=nid("NT"))
+                nid_val = c1.text_input("Employee ID (Automatic)", value=next_employee_id(), disabled=True)
                 name = c2.text_input("Name *")
                 role_type = c1.selectbox("Role", ["Driver","Peon","Clerk","Admin Staff","Security","Cleaner","Lab Assistant","Librarian Assistant","Other"])
                 phone = c2.text_input("Phone")
@@ -1344,7 +1583,10 @@ def page_non_teaching():
                 nt_other_doc = st.file_uploader("Other Document", type=["pdf", "jpg", "png"], key="nt_other_doc")
                 uname = c1.text_input("Login Username (optional)")
                 upwd = c2.text_input("Login Password", type="password")
-                if st.form_submit_button("➕ Add Staff", type="primary") and name:
+                submitted_nt = st.form_submit_button("➕ Add Staff", type="primary")
+                if submitted_nt and not name.strip():
+                    st.error("❌ Staff name is required. Nothing was saved.")
+                if submitted_nt and name.strip():
                     nt.append({"id":nid_val,"name":name,"role":role_type, "designation":designation,
                                "qualification":qualification,"joining_date":str(joining_date),
                                "phone":phone,"email":email,"salary":salary,
@@ -1357,7 +1599,7 @@ def page_non_teaching():
                         users.append({"username":uname,"password":hpw(upwd),"role":"Non-Teaching",
                                       "name":name,"active":True})
                         save("users", users)
-                    st.success("Added"); st.rerun()
+                    flash_message("success", "Added"); st.rerun()
         if nt:
             st.dataframe(pd.DataFrame([n for n in nt if isinstance(n,dict)]),
                          use_container_width=True, hide_index=True)
@@ -1414,7 +1656,7 @@ def page_non_teaching():
                             break
                     save("non_teaching", nt)
                     log(current_user().get("username"), "Admission Cell", "NON_TEACHING_FULL_UPDATE", nid_sel)
-                    st.success("Non-teaching staff ke saare saved fields update ho gaye.")
+                    flash_message("success", "Non-teaching staff ke saare saved fields update ho gaye.")
                     st.rerun()
 
 # ============================================================
@@ -1453,7 +1695,7 @@ def page_attendance():
                                 "student_id":s["id"],
                                 "status":"Present" if marks[s["id"]] else "Absent",
                                 "by":current_user()["username"],"ts":now()})
-                save("attendance", att); st.success("Saved"); st.rerun()
+                save("attendance", att); flash_message("success", "Saved"); st.rerun()
 
         with tab2:
             c1, c2 = st.columns(2)
@@ -1505,7 +1747,7 @@ def page_marks():
                 for s in class_students:
                     marks.append({"id":nid("M"),"subject_id":sub,"student_id":s["id"],
                                   "exam":exam,"marks":mks[s["id"]],"max":subject_max,"ts":now()})
-                save("marks", marks); st.success("Saved"); st.rerun()
+                save("marks", marks); flash_message("success", "Saved"); st.rerun()
 
         with tab2:
             c1, c2 = st.columns(2)
@@ -1593,12 +1835,14 @@ def page_fees():
                 amt = st.number_input("Amount (₹)", 0, 10_000_000, max(0,int(due)))
                 mode = st.selectbox("Mode", ["Cash","UPI","Card","NEFT/RTGS","Cheque","DD"])
                 note = st.text_input("Note")
-                if st.form_submit_button("✅ Record Payment", type="primary") and amt > 0:
+                submitted_payment = st.form_submit_button("✅ Record Payment", type="primary")
+                if submitted_payment and amt <= 0: st.error("❌ Enter a payment amount greater than zero.")
+                if submitted_payment and amt > 0:
                     fees.append({"id":nid("R"),"student_id":sid,"amount":amt,
                                  "mode":mode,"note":note,"ts":now(),
                                  "by":current_user()["username"]})
                     save("fees", fees)
-                    st.success(f"✅ Receipt: {fees[-1]['id']}"); st.rerun()
+                    flash_message("success", f"✅ Receipt: {fees[-1]['id']}"); st.rerun()
 
     with tab2:
         rows = []
@@ -1631,46 +1875,291 @@ def page_fees():
                     stu_e["discount_pct"] = disc
                     stu_e["final_fee"] = round(final, 2)
                     save("students", students)
-                    st.success("Updated"); st.rerun()
+                    flash_message("success", "Updated"); st.rerun()
 
 # ============================================================
 # BILLS & OTHER CHARGES
 # ============================================================
 def page_bills():
     if not guard("Accountant"): return
-    page_header("Bills & Other Charges", "Manage additional charges")
-    bills = [b for b in load("bills") if isinstance(b,dict)]
-    students = [s for s in load("students") if isinstance(s,dict) and s.get("id")]
-    sm = {s["id"]:s.get("name","") for s in students}
+    page_header("Accounts, Bills & Expenses", "Track income, expenses, employee salary payments, invoices and supporting bills")
 
-    tab1, tab2 = st.tabs(["📋 All Bills", "➕ Add Bill"])
+    bills = [b for b in load("bills") if isinstance(b, dict)]
+    students = [x for x in load("students") if isinstance(x, dict) and x.get("id")]
+    teaching = [x for x in load("staff") if isinstance(x, dict) and x.get("id")]
+    non_teaching = [x for x in load("non_teaching") if isinstance(x, dict) and x.get("id")]
+    employees = [(str(x.get("id")), x.get("name", "Employee"), "Teaching") for x in teaching]
+    employees += [(str(x.get("id")), x.get("name", "Employee"), "Non-Teaching") for x in non_teaching]
+    student_names = {str(x.get("id")): x.get("name", "") for x in students}
+    employee_map = {str(eid): (name, typ) for eid, name, typ in employees}
+
+    income_categories = ["Student Fee Collection", "Admission Fee", "Tuition Fee", "Examination Fee",
+        "Library Fee/Fine", "Hostel Fee", "Transport Fee", "Laboratory Fee", "Canteen Income",
+        "Grant/Funding", "Donation", "Interest Income", "Other Income"]
+    expense_categories = ["Electricity Bill", "Water Bill", "Internet/Wi-Fi Bill", "Telephone/Mobile Bill",
+        "Employee Salary", "Staff Allowance/Bonus", "Building Rent", "Building Maintenance/Repair",
+        "Cleaning/Sanitation", "Security Services", "Stationery/Office Supplies", "Printing/Photocopy",
+        "Computer/IT Equipment", "Software/Cloud Services", "Laboratory Equipment/Supplies",
+        "Library Books/Journals", "Furniture", "Vehicle/Fuel/Transport", "Travel/Conveyance",
+        "Exam Paper/Printing/Exam Expenses", "Events/Functions", "Sports/Cultural Activities",
+        "Hostel/Mess Supplies", "Medical/First Aid", "Taxes/Government Fees", "Insurance",
+        "Marketing/Advertisement", "Bank Charges", "Professional/Legal/Audit Fees",
+        "Water Tanker", "Waste Disposal", "Other Expense"]
+
+    def money(value):
+        try: return float(value or 0)
+        except (ValueError, TypeError): return 0.0
+
+    # Cash totals include only actual receipts/payments, not unpaid invoices.
+    received = sum(money(b.get("amount")) for b in bills
+                   if b.get("entry_kind") == "Income" and b.get("status") in ("Received", "Paid"))
+    paid_expenses = sum(money(b.get("amount")) for b in bills
+                        if b.get("entry_kind") == "Expense" and b.get("status") == "Paid")
+    unpaid_expenses = sum(money(b.get("amount")) for b in bills
+                          if b.get("entry_kind") == "Expense" and b.get("status") == "Unpaid")
+    net = received - paid_expenses
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Total Income Received", f"₹{received:,.2f}")
+    m2.metric("Expenses Paid", f"₹{paid_expenses:,.2f}")
+    m3.metric("Unpaid Expenses", f"₹{unpaid_expenses:,.2f}")
+    m4.metric("Net Profit / Loss", f"₹{net:,.2f}", delta="Profit" if net >= 0 else "Loss")
+    st.caption("Profit/loss shown here = recorded income received minus expenses marked Paid. Unpaid bills are shown separately.")
+
+    tab1, tab2, tab3 = st.tabs(["📚 Ledger & Bills", "➕ Add Entry", "✏️ Edit Entry"])
 
     with tab1:
-        if not bills: st.info("No bills"); return
-        df = pd.DataFrame(bills)
-        df["student"] = df["student_id"].map(sm)
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        if not bills:
+            st.info("No account entries yet. Use Add Entry to record income, expenses, salaries or student bills.")
+        else:
+            rows = []
+            for b in bills:
+                row = dict(b)
+                row["student_name"] = student_names.get(str(b.get("student_id", "")), "")
+                eid = str(b.get("employee_id", ""))
+                row["employee_name"] = b.get("employee_name") or employee_map.get(eid, ("", ""))[0]
+                row["record_type"] = b.get("entry_kind", "Student Bill" if b.get("student_id") else "Legacy Entry")
+                row["attachment"] = "Attached" if b.get("attachment_data") else "—"
+                rows.append(row)
+            display_cols = [c for c in ["id", "record_type", "type", "category", "student_name", "employee_name",
+                "employee_id", "amount", "status", "date", "note", "attachment"] if any(c in r for r in rows)]
+            st.dataframe(pd.DataFrame(rows)[display_cols], use_container_width=True, hide_index=True)
+            # Show receipt/invoice image for the selected record, when present.
+            ids = [str(b.get("id")) for b in bills if b.get("id")]
+            if ids:
+                view_id = st.selectbox("View attached bill / receipt", ["— Select —"] + ids, key="view_bill_attachment")
+                record = next((b for b in bills if str(b.get("id")) == view_id), None)
+                if record and record.get("attachment_data"):
+                    try:
+                        st.image(base64.b64decode(record["attachment_data"]), caption=record.get("attachment_name", "Attached bill"), use_container_width=True)
+                        st.download_button("⬇ Download attachment", base64.b64decode(record["attachment_data"]),
+                            file_name=record.get("attachment_name") or "bill_attachment", key=f"download_attachment_{view_id}")
+                    except Exception:
+                        st.warning("This attachment could not be displayed. Try downloading it from the record.")
 
     with tab2:
-        with st.form("add_bill"):
+        entry_kind = st.selectbox("Entry Type", ["Expense", "Income", "Student Bill"],
+            help="Income is money received; Expense is money paid/payable; Student Bill is a student invoice/charge.")
+        c1, c2 = st.columns(2)
+        if entry_kind == "Income":
+            category = c1.selectbox("Income Type", income_categories)
+        elif entry_kind == "Expense":
+            category = c1.selectbox("Expense Type", expense_categories)
+        else:
+            category = c1.selectbox("Student Bill Type", ["Tuition Fee", "Admission Fee", "Examination Fee",
+                "Library Fee/Fine", "Hostel Charges", "Transport Charges", "Laboratory Fee", "Other Student Charge"])
+        amount = c2.number_input("Amount (₹)", min_value=0.0, max_value=100000000.0, value=0.0, step=500.0)
+        c1, c2 = st.columns(2)
+        entry_date = c1.date_input("Entry Date", value=date.today())
+        status_options = ["Received", "Pending", "Cancelled"] if entry_kind == "Income" else (["Paid", "Unpaid", "Cancelled"] if entry_kind == "Expense" else ["Unpaid", "Paid", "Cancelled"])
+        status = c2.selectbox("Payment / Bill Status", status_options, index=0 if entry_kind in ("Income", "Expense") else 0)
+        note = st.text_area("Description / Notes", placeholder="Vendor, bill number, purpose, payment reference, etc.")
+
+        student_id = ""
+        employee_id = ""
+        employee_name = ""
+        custom_category = ""
+        if category in ("Other Expense", "Other Income", "Other Student Charge"):
+            custom_category = st.text_input("Specify expense/income type", placeholder="e.g. campus generator repair")
+        if entry_kind == "Student Bill":
+            if students:
+                student_id = st.selectbox("Student", [str(x["id"]) for x in students],
+                    format_func=lambda x: f"{x} — {student_names.get(x, '')}")
+            else:
+                st.warning("No student records found. You can still record general university income/expenses.")
+        if entry_kind == "Expense" and category == "Employee Salary":
+            if employees:
+                employee_id = st.selectbox("Employee ID", [e[0] for e in employees],
+                    format_func=lambda x: f"{x} — {employee_map.get(x, ('Unknown', ''))[0]} ({employee_map.get(x, ('', ''))[1]})")
+                employee_name = employee_map.get(employee_id, ("", ""))[0]
+                st.info(f"Salary payment employee: {employee_name} · ID: {employee_id}")
+            else:
+                st.warning("No teaching/non-teaching employee records found. Add employee records first.")
+        uploaded = st.file_uploader("Attach bill / receipt image (optional)", type=["png", "jpg", "jpeg", "webp"], key="new_account_attachment")
+        submit = st.button("💾 Save Account Entry", type="primary", use_container_width=True)
+        if submit:
+            if amount <= 0:
+                st.error("Amount must be greater than zero.")
+            elif entry_kind == "Student Bill" and not student_id:
+                st.error("Select a student before creating a student bill.")
+            elif category in ("Other Expense", "Other Income", "Other Student Charge") and not custom_category.strip():
+                st.error("Please specify the Other expense/income type.")
+            elif entry_kind == "Expense" and category == "Employee Salary" and not employee_id:
+                st.error("Select an employee for salary payment.")
+            else:
+                with st.spinner("Saving account entry..."):
+                    entry_id = nid("BL")
+                    attach_data, attach_name, attach_mime = "", "", ""
+                    if uploaded is not None:
+                        attach_data = base64.b64encode(uploaded.getvalue()).decode("ascii")
+                        attach_name, attach_mime = uploaded.name, uploaded.type or "application/octet-stream"
+                    final_category = custom_category.strip() if custom_category.strip() else category
+                    entry = {"id": entry_id, "entry_kind": entry_kind, "type": final_category,
+                        "category": final_category, "amount": float(amount), "status": status,
+                        "date": entry_date.isoformat(), "note": note.strip(), "student_id": student_id,
+                        "employee_id": employee_id, "employee_name": employee_name,
+                        "attachment_data": attach_data, "attachment_name": attach_name,
+                        "attachment_mime": attach_mime, "ts": now(),
+                        "created_by": current_user().get("username", "")}
+                    bills.append(entry)
+                    save("bills", bills)
+                flash_message("success", f"Account entry {entry_id} saved successfully.")
+                st.rerun()
+
+    with tab3:
+        if not bills:
+            st.info("There are no entries to edit yet.")
+        else:
+            edit_ids = [str(b.get("id")) for b in bills if b.get("id")]
+            edit_id = st.selectbox("Select entry to edit", edit_ids, key="edit_account_entry_id")
+            selected = next((b for b in bills if str(b.get("id")) == edit_id), {})
+            st.caption(f"Editing record {edit_id}. Existing attachment will be kept unless you upload a replacement.")
+            kind_default = selected.get("entry_kind", "Student Bill" if selected.get("student_id") else "Expense")
             c1, c2 = st.columns(2)
-            sid = c1.selectbox("Student", [s["id"] for s in students],
-                               format_func=lambda x: f"{x} — {sm.get(x,'')}")
-            bill_type = c2.selectbox("Bill Type",
-                ["Exam Fee","Library Fine","Hostel Charges","Transport Charges","Lab Fee","Other"])
+            edit_kind = c1.selectbox("Entry Type", ["Expense", "Income", "Student Bill"],
+                index=["Expense", "Income", "Student Bill"].index(kind_default) if kind_default in ["Expense", "Income", "Student Bill"] else 0)
+            current_category = selected.get("category", selected.get("type", "Other Expense"))
+            if edit_kind == "Income":
+                categories = income_categories
+            elif edit_kind == "Expense":
+                categories = expense_categories
+            else:
+                categories = ["Tuition Fee", "Admission Fee", "Examination Fee", "Library Fee/Fine", "Hostel Charges", "Transport Charges", "Laboratory Fee", "Other Student Charge"]
+            if current_category not in categories:
+                categories = categories + [current_category]
+            edit_category = c2.selectbox("Category", categories, index=categories.index(current_category))
             c1, c2 = st.columns(2)
-            amt = c1.number_input("Amount (₹)", 0, 10_000_000, 0)
-            note = c2.text_input("Note")
-            if st.form_submit_button("➕ Add Bill", type="primary") and amt > 0:
-                bills.append({"id":nid("BL"),"student_id":sid,"type":bill_type,
-                              "amount":amt,"note":note,"status":"Unpaid",
-                              "ts":now()})
-                save("bills", bills)
-                st.success("✅ Bill added"); st.rerun()
+            edit_amount = c1.number_input("Amount (₹)", min_value=0.0, max_value=100000000.0, value=money(selected.get("amount")), step=500.0)
+            current_status = selected.get("status", "Unpaid")
+            edit_status_options = ["Received", "Pending", "Cancelled"] if edit_kind == "Income" else ["Paid", "Unpaid", "Cancelled"]
+            if current_status not in edit_status_options: edit_status_options.append(current_status)
+            edit_status = c2.selectbox("Status", edit_status_options, index=edit_status_options.index(current_status))
+            date_value = selected.get("date", date.today().isoformat())
+            try: parsed_date = date.fromisoformat(str(date_value)[:10])
+            except ValueError: parsed_date = date.today()
+            edit_date = st.date_input("Entry Date", value=parsed_date)
+            edit_note = st.text_area("Description / Notes", value=str(selected.get("note", "")))
+            edit_student_id = ""
+            if edit_kind == "Student Bill" and students:
+                existing_sid = str(selected.get("student_id", students[0]["id"]))
+                student_ids = [str(x["id"]) for x in students]
+                if existing_sid not in student_ids: student_ids.append(existing_sid)
+                edit_student_id = st.selectbox("Student", student_ids, index=student_ids.index(existing_sid),
+                    format_func=lambda x: f"{x} — {student_names.get(x, '')}")
+            edit_employee_id = str(selected.get("employee_id", ""))
+            edit_employee_name = str(selected.get("employee_name", ""))
+            if edit_kind == "Expense" and edit_category == "Employee Salary" and employees:
+                emp_ids = [e[0] for e in employees]
+                if edit_employee_id not in emp_ids: emp_ids.append(edit_employee_id)
+                edit_employee_id = st.selectbox("Employee ID", emp_ids,
+                    index=emp_ids.index(edit_employee_id) if edit_employee_id in emp_ids else 0,
+                    format_func=lambda x: f"{x} — {employee_map.get(x, (edit_employee_name, ''))[0]}")
+                edit_employee_name = employee_map.get(edit_employee_id, (edit_employee_name, ""))[0]
+            replacement = st.file_uploader("Replace bill / receipt attachment (optional)", type=["png", "jpg", "jpeg", "webp"], key=f"replace_attachment_{edit_id}")
+            delete_attachment = st.checkbox("Remove existing attachment", value=False, key=f"remove_attachment_{edit_id}")
+            save_edit = st.button("💾 Save Changes", type="primary", use_container_width=True)
+            if save_edit:
+                if edit_amount <= 0:
+                    st.error("Amount must be greater than zero.")
+                else:
+                    with st.spinner("Updating account entry..."):
+                        for b in bills:
+                            if str(b.get("id")) == edit_id:
+                                b.update({"entry_kind": edit_kind, "type": edit_category, "category": edit_category,
+                                    "amount": float(edit_amount), "status": edit_status, "date": edit_date.isoformat(),
+                                    "note": edit_note.strip(), "student_id": edit_student_id,
+                                    "employee_id": edit_employee_id, "employee_name": edit_employee_name,
+                                    "updated_at": now()})
+                                if delete_attachment:
+                                    b["attachment_data"], b["attachment_name"], b["attachment_mime"] = "", "", ""
+                                if replacement is not None:
+                                    b["attachment_data"] = base64.b64encode(replacement.getvalue()).decode("ascii")
+                                    b["attachment_name"] = replacement.name
+                                    b["attachment_mime"] = replacement.type or "application/octet-stream"
+                        save("bills", bills)
+                    flash_message("success", f"Account entry {edit_id} updated successfully.")
+                    st.rerun()
 
 # ============================================================
 # SALARY MANAGEMENT
 # ============================================================
+def _salary_slip_download(slip, employee_name, employee_type, college_name):
+    """Return a downloadable salary slip; use PDF when ReportLab is installed, HTML otherwise."""
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.enums import TA_CENTER
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=48, leftMargin=48, topMargin=48, bottomMargin=48)
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle("SlipTitle", parent=styles["Title"], alignment=TA_CENTER, textColor=colors.HexColor("#1d4ed8"))
+        story = [Paragraph(html.escape(str(college_name or "College")), title_style),
+                 Paragraph("SALARY SLIP", ParagraphStyle("SlipSub", parent=styles["Heading2"], alignment=TA_CENTER)),
+                 Spacer(1, 18)]
+        details = [
+            ["Slip ID", str(slip.get("id", "")), "Pay Period", f'{slip.get("month", "")} {slip.get("year", "")}'],
+            ["Employee Name", str(employee_name or ""), "Employee ID", str(slip.get("employee_id", ""))],
+            ["Employee Type", str(employee_type or ""), "Generated On", str(slip.get("ts", ""))],
+        ]
+        details_table = Table(details, colWidths=[95, 155, 90, 155])
+        details_table.setStyle(TableStyle([("GRID", (0,0), (-1,-1), .5, colors.HexColor("#cbd5e1")),
+            ("BACKGROUND", (0,0), (0,-1), colors.HexColor("#eff6ff")),
+            ("BACKGROUND", (2,0), (2,-1), colors.HexColor("#eff6ff")),
+            ("FONTNAME", (0,0), (0,-1), "Helvetica-Bold"), ("FONTNAME", (2,0), (2,-1), "Helvetica-Bold"),
+            ("VALIGN", (0,0), (-1,-1), "MIDDLE"), ("TOPPADDING", (0,0), (-1,-1), 9), ("BOTTOMPADDING", (0,0), (-1,-1), 9)]))
+        story += [details_table, Spacer(1, 22)]
+        pay_rows = [["Earnings / Deductions", "Amount (INR)"],
+                    ["Basic Salary", f'{float(slip.get("basic", 0) or 0):,.2f}'],
+                    ["Allowance", f'{float(slip.get("allowance", 0) or 0):,.2f}'],
+                    ["Deductions", f'-{float(slip.get("deduction", 0) or 0):,.2f}'],
+                    ["NET SALARY", f'{float(slip.get("net", 0) or 0):,.2f}']]
+        pay_table = Table(pay_rows, colWidths=[330, 165])
+        pay_table.setStyle(TableStyle([("BACKGROUND", (0,0), (-1,0), colors.HexColor("#1d4ed8")),
+            ("TEXTCOLOR", (0,0), (-1,0), colors.white), ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+            ("GRID", (0,0), (-1,-1), .5, colors.HexColor("#cbd5e1")),
+            ("ALIGN", (1,1), (1,-1), "RIGHT"), ("FONTNAME", (0,-1), (-1,-1), "Helvetica-Bold"),
+            ("BACKGROUND", (0,-1), (-1,-1), colors.HexColor("#dbeafe")),
+            ("TOPPADDING", (0,0), (-1,-1), 10), ("BOTTOMPADDING", (0,0), (-1,-1), 10)]))
+        story += [pay_table, Spacer(1, 36), Paragraph("This is a computer-generated salary slip.", styles["Italic"])]
+        doc.build(story)
+        return buffer.getvalue(), "pdf", "application/pdf"
+    except ImportError:
+        # Still provide a printable slip if ReportLab is not installed in the deployment.
+        body = f"""<!doctype html><html><head><meta charset='utf-8'><title>Salary Slip {html.escape(str(slip.get('id','')))}</title>
+        <style>body{{font-family:Arial,sans-serif;max-width:760px;margin:40px auto;color:#172033}}h1,h2{{text-align:center}}table{{width:100%;border-collapse:collapse;margin-top:24px}}td,th{{border:1px solid #ccd;padding:12px}}th{{background:#eaf1ff}}.net{{font-weight:bold;background:#dbeafe}}@media print{{button{{display:none}}}}</style></head><body>
+        <h1>{html.escape(str(college_name or 'College'))}</h1><h2>SALARY SLIP</h2>
+        <p><b>Slip ID:</b> {html.escape(str(slip.get('id','')))} &nbsp; <b>Employee ID:</b> {html.escape(str(slip.get('employee_id','')))}</p>
+        <p><b>Employee:</b> {html.escape(str(employee_name or ''))} ({html.escape(str(employee_type or ''))})</p>
+        <p><b>Pay Period:</b> {html.escape(str(slip.get('month','')))} {html.escape(str(slip.get('year','')))} &nbsp; <b>Generated:</b> {html.escape(str(slip.get('ts','')))}</p>
+        <table><tr><th>Earnings / Deductions</th><th>Amount (INR)</th></tr>
+        <tr><td>Basic Salary</td><td>{float(slip.get('basic',0) or 0):,.2f}</td></tr>
+        <tr><td>Allowance</td><td>{float(slip.get('allowance',0) or 0):,.2f}</td></tr>
+        <tr><td>Deductions</td><td>-{float(slip.get('deduction',0) or 0):,.2f}</td></tr>
+        <tr class='net'><td>NET SALARY</td><td>{float(slip.get('net',0) or 0):,.2f}</td></tr></table>
+        <p>This is a computer-generated salary slip.</p><button onclick='window.print()'>Print / Save as PDF</button></body></html>"""
+        return body.encode("utf-8"), "html", "text/html"
+
 def page_salary():
     if not guard("Accountant"): return
     page_header("Salary Management", "Manage staff salaries & generate slips")
@@ -1684,9 +2173,30 @@ def page_salary():
     tab1, tab2 = st.tabs(["📋 Salary Slips", "➕ Generate Slip"])
 
     with tab1:
-        if not salaries: st.info("No salary slips"); return
-        df = pd.DataFrame(salaries)
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        if not salaries:
+            st.info("No salary slips have been generated yet. Use Generate Slip to create the first one.")
+        else:
+            df = pd.DataFrame(salaries)
+            # Add employee names for a more useful salary register.
+            employee_names = {e[0]: e[1] for e in all_emp}
+            df["employee_name"] = df["employee_id"].map(employee_names)
+            st.dataframe(df, use_container_width=True, hide_index=True)
+            st.download_button("⬇ Download Salary Register (CSV)",
+                               df.to_csv(index=False).encode("utf-8-sig"),
+                               file_name="salary_register.csv", mime="text/csv",
+                               key="salary_register_csv")
+            settings = load("settings")
+            college_name = settings.get("college_name", "College") if isinstance(settings, dict) else "College"
+            employee_details = {e[0]: (e[1], e[2]) for e in all_emp}
+            st.subheader("Download Individual Salary Slips")
+            for slip in salaries[::-1]:
+                emp_name, emp_type = employee_details.get(slip.get("employee_id"), ("Employee", "Staff"))
+                file_bytes, file_ext, mime = _salary_slip_download(slip, emp_name, emp_type, college_name)
+                c1, c2 = st.columns([4, 1])
+                c1.write(f"**{emp_name}** · {slip.get('month', '')} {slip.get('year', '')} · Net ₹{float(slip.get('net', 0) or 0):,.2f}")
+                c2.download_button("⬇ Download Slip", file_bytes,
+                    file_name=f"salary_slip_{slip.get('id', 'slip')}.{file_ext}", mime=mime,
+                    key=f"salary_slip_download_{slip.get('id', uuid.uuid4().hex)}")
 
     with tab2:
         if not all_emp: st.info("No staff found"); return
@@ -1709,7 +2219,8 @@ def page_salary():
                                  "basic":basic,"allowance":allowance,
                                  "deduction":deduction,"net":net,"ts":now()})
                 save("salaries", salaries)
-                st.success("✅ Slip generated"); st.rerun()
+                flash_message("success", f"✅ Salary slip {salaries[-1]['id']} generated successfully.")
+                st.rerun()
 
 # ============================================================
 # PAPERS
@@ -1727,14 +2238,16 @@ def page_papers():
                                   format_func=lambda x: course_map().get(x,x))
             sem = c3.number_input("Semester", 1, 8, 1)
             file = st.file_uploader("PDF", type=["pdf"])
-            if st.form_submit_button("Upload", type="primary") and file and title:
+            submitted_paper = st.form_submit_button("Upload", type="primary")
+            if submitted_paper and (not file or not title.strip()): st.error("❌ Enter a title and choose a PDF before uploading.")
+            if submitted_paper and file and title.strip():
                 p = save_file(file, UPLOAD_DIR)
                 papers = load("papers")
                 papers.append({"id":nid("P"),"title":title,"course_id":course,
                                "semester":sem,"filename":Path(p).name,
                                "path":p,"ts":now(),
                                "by":current_user()["username"]})
-                save("papers", papers); st.success("Uploaded"); st.rerun()
+                save("papers", papers); flash_message("success", "Uploaded"); st.rerun()
     st.divider()
     c1, c2 = st.columns(2)
     course_f = c1.selectbox("View Course", list(course_map().keys()),
@@ -1770,14 +2283,17 @@ def page_materials():
                                       format_func=lambda x: course_map().get(x,x))
                 sem = st.number_input("Semester", 1, 8, 1)
                 file = st.file_uploader("File", type=["pdf","docx","pptx","zip"])
-                if st.form_submit_button("Upload", type="primary") and file and title:
+                submitted_material = st.form_submit_button("Upload", type="primary")
+                if submitted_material and (not file or not title.strip()):
+                    st.error("❌ Enter a title and choose a file before uploading.")
+                if submitted_material and file and title.strip():
                     p = save_file(file, UPLOAD_DIR)
                     mats = load("materials")
                     mats.append({"id":nid("MT"),"title":title,"course_id":course,
                                  "semester":sem,"filename":Path(p).name,
                                  "path":p,"ts":now(),
                                  "by":current_user()["username"]})
-                    save("materials", mats); st.success("Uploaded"); st.rerun()
+                    save("materials", mats); flash_message("success", "Uploaded"); st.rerun()
     st.divider()
     mats = [m for m in load("materials") if isinstance(m,dict)]
     if not mats: st.info("No materials"); return
@@ -1800,17 +2316,19 @@ def page_leaves():
     role = current_role()
     leaves = load("leaves")
 
-    if role in ("Student","Teacher"):
+    if role in ("Student", "Teacher", "Accountant"):
         with st.form("apply_leave"):
             c1, c2 = st.columns(2)
             frm = c1.date_input("From", value=date.today())
             to = c2.date_input("To", value=date.today())
             reason = st.text_area("Reason *")
-            if st.form_submit_button("📄 Apply", type="primary") and reason:
+            submitted_leave = st.form_submit_button("📄 Apply", type="primary")
+            if submitted_leave and not reason.strip(): st.error("❌ Leave reason is required.")
+            if submitted_leave and reason.strip():
                 leaves.append({"id":nid("L"),"user":u["username"],"name":u["name"],
                                "role":role,"from":str(frm),"to":str(to),
                                "reason":reason,"status":"Pending","remark":"","ts":now()})
-                save("leaves", leaves); st.success("Applied"); st.rerun()
+                save("leaves", leaves); flash_message("success", "Applied"); st.rerun()
 
     if role in ("Accountant","Admin") or is_admin():
         pending = [l for l in leaves if isinstance(l,dict) and l.get("status")=="Pending"]
@@ -1833,10 +2351,17 @@ def page_leaves():
                     save("leaves", leaves); st.rerun()
 
     st.divider()
-    st.subheader("📋 All Leaves")
-    if leaves:
-        st.dataframe(pd.DataFrame([l for l in leaves if isinstance(l,dict)]),
-                     use_container_width=True, hide_index=True)
+    st.subheader("📋 Leave Requests")
+    if role in ("Admin", "Accountant") or is_admin():
+        visible_leaves = [l for l in leaves if isinstance(l, dict)]
+    else:
+        visible_leaves = [l for l in leaves if isinstance(l, dict) and
+                          str(l.get("user", l.get("username", ""))).lower() ==
+                          str(u.get("username", "")).lower()]
+    if visible_leaves:
+        st.dataframe(pd.DataFrame(visible_leaves), use_container_width=True, hide_index=True)
+    else:
+        st.info("No leave requests to display yet.")
 
 # ============================================================
 # LIBRARY
@@ -1856,10 +2381,12 @@ def page_library():
             t = c1.text_input("Title *")
             a = c2.text_input("Author")
             copies = c1.number_input("Copies", 1, 100, 1)
-            if st.form_submit_button("Add", type="primary") and t:
+            submitted_book = st.form_submit_button("Add", type="primary")
+            if submitted_book and not t.strip(): st.error("❌ Book title is required.")
+            if submitted_book and t.strip():
                 books.append({"id":nid("B"),"title":t,"author":a,
                               "total":copies,"available":copies})
-                save("library_books", books); st.rerun()
+                save("library_books", books); flash_message("success", "✅ Book added successfully."); st.rerun()
         if books:
             st.dataframe(pd.DataFrame(books), use_container_width=True, hide_index=True)
 
@@ -1880,7 +2407,7 @@ def page_library():
                     issues.append({"id":nid("I"),"book_id":bid,"student_id":sid,
                                    "status":"Issued","ts":now(),
                                    "due_date":str(due),"return_ts":""})
-                    save("library_issues", issues); st.success("Issued"); st.rerun()
+                    save("library_issues", issues); flash_message("success", "Issued"); st.rerun()
         active = [i for i in issues if i.get("status")=="Issued"]
         st.subheader(f"📖 Active ({len(active)})")
         for i in active:
@@ -1938,7 +2465,7 @@ def page_hostel_transport():
                             st_row["hostel_type"] = room_type_value
                             break
                     save("students", all_students)
-                    st.success("Hostel room allotment saved.")
+                    flash_message("success", "Hostel room allotment saved.")
                     st.rerun()
         else: st.info("No hostel students")
 
@@ -1954,22 +2481,84 @@ def page_hostel_transport():
 # ANNOUNCEMENTS
 # ============================================================
 def page_announcements():
-    page_header("Announcements", "Notices")
-    if current_role() in ("Admin","Exam Cell") or is_admin():
-        with st.form("ann"):
-            title = st.text_input("Title *")
-            body = st.text_area("Message *")
-            if st.form_submit_button("📢 Post", type="primary") and title and body:
-                a = load("announcements")
-                a.append({"id":nid("AN"),"title":title,"body":body,
-                          "by":current_user()["name"],"ts":now()})
-                save("announcements", a); st.success("Posted"); st.rerun()
-    for a in load("announcements")[::-1]:
-        if isinstance(a, dict):
-            with st.container(border=True):
-                st.markdown(f"### {a.get('title','')}")
-                st.write(a.get("body",""))
-                st.caption(f"{a.get('by','')} · {a.get('ts','')}")
+    page_header("Announcements & Notices", "Create, edit and remove campus notices")
+    can_manage = current_role() in ("Admin", "Exam Cell") or is_admin()
+    if can_manage:
+        with st.expander("➕ Create New Notice / Announcement", expanded=True):
+            with st.form("ann"):
+                title = st.text_input("Notice title *", placeholder="e.g. University examination schedule")
+                body = st.text_area("Notice details *", placeholder="Write the complete notice here…", height=130)
+                priority = st.selectbox("Priority", ["Normal", "Important", "Urgent"])
+                submitted_announcement = st.form_submit_button("📢 Publish Notice", type="primary", use_container_width=True)
+            if submitted_announcement:
+                if not title.strip() or not body.strip():
+                    st.error("❌ Notice title aur details dono bharna zaroori hai.")
+                else:
+                    with st.spinner("Publishing notice…"):
+                        a = load("announcements")
+                        a.append({"id":nid("AN"), "title":title.strip(), "body":body.strip(),
+                                  "priority":priority, "by":current_user().get("name", "Admin"), "ts":now()})
+                        save("announcements", a)
+                    flash_message("success", "📢 Notice successfully published.")
+                    st.rerun()
+
+    notices = [a for a in load("announcements") if isinstance(a, dict)][::-1]
+    st.subheader(f"📌 Notices & Announcements ({len(notices)})")
+    if not notices:
+        st.info("Abhi koi notice publish nahi hua hai.")
+        return
+    for i, notice in enumerate(notices):
+        priority = notice.get("priority", "Normal")
+        with st.container(border=True):
+            c1, c2 = st.columns([5, 1])
+            with c1:
+                st.markdown(f"### {html.escape(str(notice.get('title', 'Untitled notice')))}")
+                if priority in ("Important", "Urgent"):
+                    st.warning(f"{priority} notice")
+                st.write(str(notice.get("body", "")))
+                st.caption(f"{notice.get('by', 'Campus Admin')} · {notice.get('ts', '')} · ID: {notice.get('id', '—')}")
+            if can_manage:
+                with c2:
+                    if st.button("✏️ Edit", key=f"edit_notice_{notice.get('id', i)}", use_container_width=True):
+                        st.session_state["editing_notice_id"] = notice.get("id")
+                if st.session_state.get("editing_notice_id") == notice.get("id"):
+                    with st.form(f"edit_notice_form_{notice.get('id', i)}"):
+                        edit_title = st.text_input("Title", value=str(notice.get("title", "")))
+                        edit_body = st.text_area("Notice details", value=str(notice.get("body", "")), height=120)
+                        edit_priority = st.selectbox("Priority", ["Normal", "Important", "Urgent"], index=["Normal", "Important", "Urgent"].index(priority) if priority in ["Normal", "Important", "Urgent"] else 0)
+                        save_notice = st.form_submit_button("💾 Save Notice", type="primary")
+                    if save_notice:
+                        if not edit_title.strip() or not edit_body.strip():
+                            st.error("Title aur details blank nahi ho sakte.")
+                        else:
+                            with st.spinner("Updating notice…"):
+                                all_notices = load("announcements")
+                                for item in all_notices:
+                                    if isinstance(item, dict) and item.get("id") == notice.get("id"):
+                                        item.update({"title":edit_title.strip(), "body":edit_body.strip(), "priority":edit_priority, "updated_at":now()})
+                                        break
+                                save("announcements", all_notices)
+                            st.session_state.pop("editing_notice_id", None)
+                            flash_message("success", "Notice updated successfully.")
+                            st.rerun()
+                    if st.button("Cancel edit", key=f"cancel_notice_{notice.get('id', i)}"):
+                        st.session_state.pop("editing_notice_id", None)
+                        st.rerun()
+                if st.button("🗑️ Delete", key=f"delete_notice_{notice.get('id', i)}"):
+                    st.session_state["confirm_delete_notice_id"] = notice.get("id")
+                if st.session_state.get("confirm_delete_notice_id") == notice.get("id"):
+                    st.warning("Delete this notice permanently?")
+                    yes, no = st.columns(2)
+                    if yes.button("Yes, delete", key=f"yes_delete_notice_{notice.get('id', i)}"):
+                        with st.spinner("Deleting notice…"):
+                            remaining = [item for item in load("announcements") if not (isinstance(item, dict) and item.get("id") == notice.get("id"))]
+                            save("announcements", remaining)
+                        st.session_state.pop("confirm_delete_notice_id", None)
+                        flash_message("success", "Notice deleted.")
+                        st.rerun()
+                    if no.button("Cancel", key=f"no_delete_notice_{notice.get('id', i)}"):
+                        st.session_state.pop("confirm_delete_notice_id", None)
+                        st.rerun()
 
 # ============================================================
 # EXAMS
@@ -1992,7 +2581,7 @@ def page_exams():
                 exams = load("exams")
                 exams.append({"id":nid("E"),"subject_id":sub,"type":typ,
                               "date":str(d),"time":tm,"venue":venue,"ts":now()})
-                save("exams", exams); st.success("Scheduled"); st.rerun()
+                save("exams", exams); flash_message("success", "Scheduled"); st.rerun()
     st.divider()
     st.subheader("📅 Exam Calendar")
     exams = [e for e in load("exams") if isinstance(e,dict)]
@@ -2171,13 +2760,54 @@ def page_users():
         role = c1.selectbox("Role", ["Admin","Admission Cell","Accountant","Teacher",
                                     "Student","Librarian","Exam Cell","Hostel Manager","Non-Teaching"])
         name = c2.text_input("Name *")
-        if st.form_submit_button("Add User", type="primary") and uname and pwd and name:
+        submitted_user = st.form_submit_button("Add User", type="primary")
+        if submitted_user and (not uname.strip() or not pwd.strip() or not name.strip()):
+            st.error("❌ Username, password and name are required.")
+        if submitted_user and uname.strip() and pwd.strip() and name.strip():
             if any(u.get("username")==uname for u in users):
                 st.error("Username exists")
             else:
                 users.append({"username":uname,"password":hpw(pwd),"role":role,
                               "name":name,"active":True})
-                save("users", users); st.success("Added"); st.rerun()
+                save("users", users); flash_message("success", "Added"); st.rerun()
+
+# ============================================================
+# UNIVERSAL RECORD EDITOR — all ERP modules
+# ============================================================
+def page_all_records_editor():
+    if not is_admin():
+        st.error("🚫 Only Admin can edit all module records.")
+        return
+    page_header("Edit Any ERP Record", "Admin can edit saved fields from any module")
+    module = st.selectbox("Select module", KEYS, format_func=lambda x: x.replace("_", " ").title(), key="universal_edit_module")
+    data = load(module)
+    if isinstance(data, dict):
+        records = [data]
+        record_labels = [module.replace("_", " ").title()]
+    elif isinstance(data, list):
+        records = [x for x in data if isinstance(x, dict)]
+        record_labels = [str(x.get("id") or x.get("username") or x.get("code") or f"Record {i+1}") + (f" — {x.get('name','')}" if x.get("name") else "") for i, x in enumerate(records)]
+    else:
+        records, record_labels = [], []
+    if not records:
+        st.info("Is module mein abhi editable record nahi hai.")
+        return
+    idx = st.selectbox("Choose record", range(len(records)), format_func=lambda i: record_labels[i], key=f"universal_edit_record_{module}")
+    record = records[idx]
+    st.caption("Saved fields edit karo. Nested list/dict fields JSON format mein editable hain. Record ID locked rahegi taaki linked records na tootain.")
+    updated = _edit_complete_record(record, f"universal_editor_{module}_{idx}", module.title())
+    if updated is not None:
+        with st.spinner("Saving edited record..."):
+            if isinstance(data, dict):
+                save(module, updated)
+            else:
+                positions = [i for i, item in enumerate(data) if isinstance(item, dict)]
+                if idx < len(positions):
+                    data[positions[idx]] = updated
+                save(module, data)
+        flash_message("success", f"✅ {module.replace('_', ' ').title()} record updated successfully.")
+        st.rerun()
+
 
 # ============================================================
 # REPORTS
@@ -2229,6 +2859,7 @@ def build_menu(role):
             ("📅 Exams", page_exams),
             ("📢 Announcements", page_announcements),
             ("👤 Users", page_users),
+            ("🛠 Edit Any Record", page_all_records_editor),
             ("📊 Reports", page_reports),
         ]
     if role == "Admission Cell":
@@ -2242,8 +2873,7 @@ def build_menu(role):
                 ("💰 Fees", page_fees),
                 ("🧾 Bills", page_bills),
                 ("💼 Salary", page_salary),
-                ("🏖 Leaves", page_leaves),
-                ("📊 Reports", page_reports)]
+                ("🏖 Leaves", page_leaves)]
     if role == "Teacher":
         return [("🏠 Dashboard", page_dashboard),
                 ("💰 Student Fees (View Only)", page_teacher_fees),
@@ -2284,6 +2914,14 @@ def main():
         st.error("⚠ No role. Contact admin.")
         if st.button("Logout"): logout()
         return
+
+    pending_flash = st.session_state.pop("_flash_message", None)
+    if isinstance(pending_flash, dict):
+        kind = pending_flash.get("kind", "success")
+        message = pending_flash.get("message", "")
+        if kind == "error": st.error(message)
+        elif kind == "warning": st.warning(message)
+        else: st.success(message)
 
     role = u["role"]
     if (u.get("username") or "").lower() == "admin":
