@@ -485,7 +485,7 @@ def _load_uncached(key):
             conn.close()
 
 
-@st.cache_data(ttl=30, show_spinner=False, max_entries=128)
+@st.cache_data(ttl=90, show_spinner=False, max_entries=256)
 def load(key):
     """Lazy, per-module data loading. Repeated reads avoid extra SQL connections."""
     return _load_uncached(key)
@@ -1817,51 +1817,87 @@ def page_non_teaching():
 def page_attendance():
     page_header("Attendance", "Mark / View")
     role = current_role()
-    students = [s for s in load("students") if isinstance(s,dict) and s.get("id")]
-    cm = course_map()
-    sm = subject_map()
+    students = [x for x in load("students") if isinstance(x, dict) and x.get("id")]
+    courses = [x for x in load("courses") if isinstance(x, dict) and x.get("id")]
+    subjects = [x for x in load("subjects") if isinstance(x, dict) and x.get("id")]
+    cm = {str(x["id"]): x.get("name", str(x["id"])) for x in courses}
+    sm = {str(x["id"]): f"{x.get('code', '')} — {x.get('name', '')}".strip(" —") for x in subjects}
 
-    if role in ("Teacher","Admin") or is_admin():
+    if role in ("Teacher", "Admin") or is_admin():
         tab1, tab2 = st.tabs(["✏ Mark", "📊 View"])
         with tab1:
-            c1, c2 = st.columns(2)
-            course = c1.selectbox("Course", list(cm.keys()), format_func=lambda x: cm[x])
-            sem = c2.number_input("Semester", 1, 8, 1)
-            subs = [s for s in load("subjects") if s.get("course_id")==course and s.get("semester")==sem]
-            if not subs: st.warning("No subjects"); return
-            sub_map = {s["id"]: f"{s['code']} — {s['name']}" for s in subs}
-            sub = st.selectbox("Subject", list(sub_map.keys()), format_func=lambda x: sub_map[x])
-            d = st.date_input("Date", value=date.today(), key="attendance_mark_date")
-            class_students = [s for s in students if s.get("course_id")==course and s.get("semester")==sem]
-            if not class_students: st.warning("No students"); return
-            marks = {}
-            for s in class_students:
-                marks[s["id"]] = st.checkbox(f"{s['id']} — {s['name']}", value=True,
-                                              key=f"att_{s['id']}_{d}_{sub}")
-            if st.button("💾 Save Attendance", type="primary"):
-                att = load("attendance")
-                att = [a for a in att if not (isinstance(a,dict) and
-                       a.get("date")==str(d) and a.get("subject_id")==sub)]
-                for s in class_students:
-                    att.append({"id":nid("A"),"date":str(d),"subject_id":sub,
-                                "student_id":s["id"],
-                                "status":"Present" if marks[s["id"]] else "Absent",
-                                "by":current_user()["username"],"ts":now()})
-                save("attendance", att); flash_message("success", "Saved"); st.rerun()
+            if not courses:
+                st.info("Pehle Courses section mein course add karein.")
+            elif not subjects:
+                st.info("Pehle Subjects section mein subjects add karein.")
+            else:
+                c1, c2 = st.columns(2)
+                course = c1.selectbox("Course", list(cm.keys()), format_func=lambda x: cm.get(str(x), str(x)), key="att_course")
+                sem = c2.selectbox("Semester", list(range(1, 9)), index=0, key="att_semester")
+                course_subjects = [x for x in subjects
+                                   if str(x.get("course_id")) == str(course)
+                                   and str(x.get("semester")) == str(sem)]
+                if not course_subjects:
+                    st.warning("Is course aur semester ke liye koi subject nahi mila.")
+                else:
+                    sub_map = {str(x["id"]): sm[str(x["id"])] for x in course_subjects}
+                    sub = st.selectbox("Subject", list(sub_map), format_func=lambda x: sub_map.get(str(x), str(x)), key="att_subject")
+                    d = st.date_input("Date", value=date.today(), key="attendance_mark_date")
+                    class_students = [x for x in students
+                                      if str(x.get("course_id")) == str(course)
+                                      and str(x.get("semester")) == str(sem)]
+                    if not class_students:
+                        st.warning("Is course aur semester mein students nahi mile.")
+                    else:
+                        st.caption(f"Total students: {len(class_students)} · Checked = Present, unchecked = Absent")
+                        marks = {}
+                        for stu in class_students:
+                            sid = str(stu["id"])
+                            marks[sid] = st.checkbox(
+                                f"{stu.get('roll_no', sid)} — {stu.get('name', '')}",
+                                value=True, key=f"att_{sid}_{d}_{sub}")
+                        if st.button("💾 Save Attendance", type="primary", key="save_attendance_btn"):
+                            with st.spinner("Attendance save ho rahi hai..."):
+                                att = [a for a in load("attendance") if isinstance(a, dict)]
+                                # Replace only this date + subject + class, preserve other records.
+                                class_ids = {str(x["id"]) for x in class_students}
+                                att = [a for a in att if not (
+                                    str(a.get("date")) == str(d)
+                                    and str(a.get("subject_id")) == str(sub)
+                                    and str(a.get("student_id")) in class_ids)]
+                                for stu in class_students:
+                                    sid = str(stu["id"])
+                                    att.append({"id": nid("A"), "date": str(d),
+                                                "subject_id": sub, "student_id": stu["id"],
+                                                "status": "Present" if marks[sid] else "Absent",
+                                                "by": current_user().get("username", ""), "ts": now()})
+                                save("attendance", att)
+                            flash_message("success", "Attendance successfully save ho gayi.")
+                            st.rerun()
 
         with tab2:
-            c1, c2 = st.columns(2)
-            date_f = c1.date_input("Date", value=date.today(), key="df")
-            att = [a for a in load("attendance") if isinstance(a,dict)]
-            att = [a for a in att if a.get("date")==str(date_f)]
-            if att:
-                df = pd.DataFrame(att)
-                df["student"] = df["student_id"].map(student_map())
+            c1, c2, c3 = st.columns([1, 1, 1])
+            date_f = c1.date_input("Date", value=date.today(), key="attendance_view_date")
+            course_filter = c2.selectbox("Course filter", ["All"] + list(cm.keys()),
+                                         format_func=lambda x: "All Courses" if x == "All" else cm.get(str(x), str(x)), key="att_view_course")
+            subject_filter = c3.selectbox("Subject filter", ["All"] + list(sm.keys()),
+                                          format_func=lambda x: "All Subjects" if x == "All" else sm.get(str(x), str(x)), key="att_view_subject")
+            records = [a for a in load("attendance") if isinstance(a, dict) and str(a.get("date")) == str(date_f)]
+            if course_filter != "All":
+                valid_ids = {str(x["id"]) for x in students if str(x.get("course_id")) == str(course_filter)}
+                records = [a for a in records if str(a.get("student_id")) in valid_ids]
+            if subject_filter != "All":
+                records = [a for a in records if str(a.get("subject_id")) == str(subject_filter)]
+            if records:
+                df = pd.DataFrame(records)
+                df["student"] = df["student_id"].map({str(k): v for k, v in student_map().items()})
                 df["subject"] = df["subject_id"].map(sm)
                 st.dataframe(df, use_container_width=True, hide_index=True)
                 csv_dl(df, "attendance", "att_dl")
             else:
-                st.info("No records for this date")
+                st.info("Selected date aur filters ke liye attendance records nahi mile.")
+    else:
+        st.warning("Attendance marking/view access sirf Teacher aur Admin ke liye hai.")
 
 # ============================================================
 # MARKS
@@ -2718,50 +2754,73 @@ def page_announcements():
 def page_exams():
     page_header("Exam Schedule", "Set / View")
     role = current_role()
+    subjects = [x for x in load("subjects") if isinstance(x, dict) and x.get("id")]
+    sm = {str(x["id"]): f"{x.get('code', '')} — {x.get('name', '')}".strip(" —") for x in subjects}
 
-    if role in ("Exam Cell","Admin") or is_admin():
-        with st.form("exam"):
-            c1, c2, c3 = st.columns(3)
-            sub = c1.selectbox("Subject", list(subject_map().keys()),
-                               format_func=lambda x: subject_map().get(x,x))
-            typ = c2.selectbox("Type", ["Internal","Midterm","Final","Practical"])
-            d = c3.date_input("Date", value=date.today())
-            c1, c2 = st.columns(2)
-            tm = c1.text_input("Time")
-            venue = c2.text_input("Venue")
-            if st.form_submit_button("📅 Add Exam", type="primary"):
-                exams = load("exams")
-                exams.append({"id":nid("E"),"subject_id":sub,"type":typ,
-                              "date":str(d),"time":tm,"venue":venue,"ts":now()})
-                save("exams", exams); flash_message("success", "Scheduled"); st.rerun()
+    if role in ("Exam Cell", "Admin") or is_admin():
+        if not subjects:
+            st.info("Exam schedule add karne se pehle Subjects section mein subjects add karein.")
+        else:
+            with st.form("exam_schedule_form", clear_on_submit=True):
+                c1, c2, c3 = st.columns(3)
+                sub = c1.selectbox("Subject", list(sm.keys()), format_func=lambda x: sm.get(str(x), str(x)))
+                typ = c2.selectbox("Type", ["Internal", "Midterm", "Final", "Practical"])
+                d = c3.date_input("Date", value=date.today())
+                c1, c2 = st.columns(2)
+                tm = c1.text_input("Time", placeholder="e.g. 10:00 AM - 1:00 PM")
+                venue = c2.text_input("Venue", placeholder="Exam hall / room")
+                submitted = st.form_submit_button("📅 Add Exam", type="primary")
+                if submitted:
+                    exams = [x for x in load("exams") if isinstance(x, dict)]
+                    exams.append({"id": nid("E"), "subject_id": sub, "type": typ,
+                                  "date": str(d), "time": tm.strip(), "venue": venue.strip(), "ts": now()})
+                    save("exams", exams)
+                    flash_message("success", "Exam successfully scheduled.")
+                    st.rerun()
+
     st.divider()
     st.subheader("📅 Exam Calendar")
-    exams = [e for e in load("exams") if isinstance(e,dict)]
-
-    if not exams:
-        st.info("No exams"); return
+    exams = [e for e in load("exams") if isinstance(e, dict) and e.get("date")]
 
     if role == "Student":
-        u = current_user()
-        student = next((s for s in load("students") if s.get("id")==u.get("student_id")), None)
+        u = current_user() or {}
+        student = next((x for x in load("students") if isinstance(x, dict)
+                        and str(x.get("id")) == str(u.get("student_id"))), None)
         if student:
-            my_subs = {s["id"] for s in load("subjects") if s.get("course_id")==student.get("course_id") and s.get("semester")==student.get("semester")}
-            exams = [e for e in exams if e.get("subject_id") in my_subs]
+            my_subs = {str(x.get("id")) for x in subjects
+                       if str(x.get("course_id")) == str(student.get("course_id"))
+                       and str(x.get("semester")) == str(student.get("semester"))}
+            exams = [e for e in exams if str(e.get("subject_id")) in my_subs]
+        else:
+            exams = []
 
-    if not exams: st.info("No exams for you"); return
+    if not exams:
+        st.info("Abhi koi exam schedule available nahi hai.")
+        return
 
-    exam_dates = sorted(list({e["date"] for e in exams}))
-    selected_date = st.selectbox("Select Date", exam_dates,
-                                 format_func=lambda x: datetime.strptime(x, "%Y-%m-%d").strftime("%A, %d %B %Y"))
+    valid_exams = []
+    for exam in exams:
+        try:
+            datetime.strptime(str(exam.get("date")), "%Y-%m-%d")
+            valid_exams.append(exam)
+        except (TypeError, ValueError):
+            continue
+    if not valid_exams:
+        st.warning("Exam records mein date format sahi nahi hai. Admin se schedule update karwayein.")
+        return
 
-    if selected_date:
-        day_exams = [e for e in exams if e["date"]==selected_date]
-        st.markdown(f"### 📅 {selected_date}")
-        for e in day_exams:
-            subj = subject_map().get(e.get("subject_id"), "")
-            with st.container(border=True):
-                st.markdown(f"**{subj}** — {e.get('type','')}")
-                st.caption(f"🕒 {e.get('time','')} · 📍 {e.get('venue','')}")
+    exam_dates = sorted({str(e["date"]) for e in valid_exams})
+    selected_date = st.selectbox(
+        "Select Date", exam_dates,
+        format_func=lambda x: datetime.strptime(x, "%Y-%m-%d").strftime("%A, %d %B %Y"),
+        key="exam_calendar_date")
+    day_exams = [e for e in valid_exams if str(e.get("date")) == str(selected_date)]
+    st.markdown(f"### 📅 {datetime.strptime(selected_date, '%Y-%m-%d').strftime('%A, %d %B %Y')}")
+    for exam in sorted(day_exams, key=lambda x: str(x.get("time", ""))):
+        subject_name = sm.get(str(exam.get("subject_id")), "Subject not found")
+        with st.container(border=True):
+            st.markdown(f"**{subject_name}** — {exam.get('type', 'Exam')}")
+            st.caption(f"🕒 {exam.get('time') or 'Time not announced'} · 📍 {exam.get('venue') or 'Venue not announced'}")
 
 # ============================================================
 # STUDENT SELF-SERVICE
