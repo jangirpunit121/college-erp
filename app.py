@@ -27,8 +27,8 @@ try:
         except Exception:
             _redis_url = ""
     if redis and _redis_url:
-        _REDIS = redis.Redis.from_url(_redis_url, decode_responses=True, socket_connect_timeout=1, socket_timeout=1)
-        _REDIS.ping()
+        # Connect lazily on first cache access; avoid delaying every app startup.
+        _REDIS = redis.Redis.from_url(_redis_url, decode_responses=True, socket_connect_timeout=0.25, socket_timeout=0.25, retry_on_timeout=False)
 except Exception:
     _REDIS = None
 
@@ -428,7 +428,8 @@ def _encode_cell(value):
     return json.dumps(value, ensure_ascii=False, default=str)
 
 
-def load(key):
+def _load_uncached(key):
+    """Read one module from MariaDB. Wrapped by Streamlit's shared data cache below."""
     if key not in KEYS:
         return []
     default = _json_default(key)
@@ -482,6 +483,12 @@ def load(key):
     finally:
         if conn:
             conn.close()
+
+
+@st.cache_data(ttl=30, show_spinner=False, max_entries=128)
+def load(key):
+    """Lazy, per-module data loading. Repeated reads avoid extra SQL connections."""
+    return _load_uncached(key)
 
 
 def save(key, data):
@@ -541,6 +548,12 @@ def save(key, data):
                 FILES[key].write_text(json.dumps(data, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
             except OSError:
                 pass
+        # Invalidate the Streamlit cache immediately so edits appear on the next rerun.
+        try:
+            load.clear(key)
+        except Exception:
+            try: load.clear()
+            except Exception: pass
         if _REDIS is not None and key in ("courses", "subjects"):
             try: _REDIS.delete(f"campuspro:v1:{key}")
             except Exception: pass
@@ -3098,7 +3111,8 @@ def main():
     for label, func in menu:
         if label == choice:
             try:
-                func()
+                with st.spinner("Page load ho raha hai..."):
+                    func()
             except Exception:
                 st.error("Is page par kaam poora nahi ho saka. Input aur database connection check karke dobara try karein.")
             break
